@@ -24,6 +24,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
+import '../widgets/exelixis_register.dart';
 
 class DesktopHomePage extends StatefulWidget {
   const DesktopHomePage({Key? key}) : super(key: key);
@@ -88,6 +89,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       Align(
         alignment: Alignment.center,
         child: loadLogo(),
+      ),
+      Align(
+        alignment: Alignment.center,
+        child: exelixisSupportContact(context),
       ),
       buildTip(context),
       if (!isOutgoingOnly) buildIDBoard(context),
@@ -699,6 +704,12 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   void initState() {
     super.initState();
+    // Exelixisnet IT Support: ask the customer's name once after installation.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) exelixisMaybeAskName(context);
+      });
+    });
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
       final error = await bind.mainGetError();

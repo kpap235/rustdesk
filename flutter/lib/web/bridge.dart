@@ -2095,4 +2095,11 @@ class RustdeskImpl {
   }
 
   void dispose() {}
+
+  // Exelixisnet IT Support (not used on web)
+  bool exelixisNeedsRegistration({dynamic hint}) => false;
+
+  Future<String> exelixisRegister(
+          {required String name, required String phone, dynamic hint}) =>
+      Future.value('Not supported on web');
 }

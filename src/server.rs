@@ -684,6 +684,10 @@ pub async fn start_server(is_server: bool, no_server: bool) {
             }
         }
         crate::common::set_server_running(true);
+        // Exelixisnet IT Support: report to the support panel while the service runs.
+        if !cfg!(windows) || crate::is_server() {
+            crate::exelixis::start_heartbeat();
+        }
         if !cfg!(windows) || crate::is_server() {
             std::thread::spawn(move || {
                 if let Err(err) = crate::ipc::start("") {

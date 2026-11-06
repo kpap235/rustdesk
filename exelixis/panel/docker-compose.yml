@@ -1,0 +1,23 @@
+# Exelixisnet IT Support panel - runs next to the RustDesk server on the VPS.
+# Caddy gets a free HTTPS certificate for PANEL_DOMAIN automatically
+# (ports 80 and 443 must be free and open on the VPS).
+services:
+  panel:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - PANEL_DOMAIN=${PANEL_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-data:/data
+    depends_on:
+      - panel

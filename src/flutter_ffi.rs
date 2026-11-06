@@ -1147,7 +1147,8 @@ pub fn main_get_app_name() -> String {
 }
 
 pub fn main_get_app_name_sync() -> SyncReturn<String> {
-    SyncReturn(get_app_name())
+    // Exelixisnet: display name with spaces for window titles and texts.
+    SyncReturn(crate::exelixis::display_name())
 }
 
 pub fn main_uri_prefix_sync() -> SyncReturn<String> {
@@ -3186,4 +3187,17 @@ pub mod server_side {
     ) -> jboolean {
         jboolean::from(crate::server::is_clipboard_service_ok())
     }
+}
+
+// --- Exelixisnet IT Support -------------------------------------------------
+
+/// True when the customer still has to fill in the name window.
+pub fn exelixis_needs_registration() -> SyncReturn<bool> {
+    SyncReturn(crate::exelixis::needs_registration())
+}
+
+/// Registers this computer with the Exelixisnet support panel.
+/// Returns an empty string on success, otherwise a message to show the customer.
+pub fn exelixis_register(name: String, phone: String) -> String {
+    crate::exelixis::register(name, phone)
 }

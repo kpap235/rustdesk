@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exelixisnet IT Support</title>
+<style>
+  :root {
+    --blue: #1557b0; --blue-dark: #0e3f82; --red: #d32f2f;
+    --bg: #f4f6fa; --card: #fff; --text: #1d2433; --muted: #6b7489; --line: #e1e5ee;
+    --ok: #1e8e3e; --off: #9aa3b5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11151d; --card: #1a202b; --text: #e6e9ef; --muted: #98a1b3; --line: #2b3342; --blue: #4d8ff0; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--card); border-bottom: 3px solid var(--blue); }
+  header .brand { font-weight: 700; font-size: 17px; }
+  header .brand span { color: var(--red); }
+  header nav { display: flex; gap: 4px; margin-left: 12px; flex-wrap: wrap; }
+  header nav button { background: none; border: 0; padding: 6px 10px; border-radius: 6px; color: var(--muted); cursor: pointer; font: inherit; }
+  header nav button.on { background: var(--bg); color: var(--text); font-weight: 600; }
+  header .who { margin-left: auto; color: var(--muted); font-size: 14px; display: flex; gap: 10px; align-items: center; }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 60px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  input, select, textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--card); color: var(--text); width: 100%; }
+  button.btn { font: inherit; padding: 8px 14px; border-radius: 7px; border: 1px solid var(--blue); background: var(--blue); color: #fff; cursor: pointer; white-space: nowrap; }
+  button.btn:hover { background: var(--blue-dark); }
+  button.ghost { background: none; color: var(--blue); }
+  button.danger { border-color: var(--red); background: none; color: var(--red); }
+  button:disabled { opacity: .5; cursor: default; }
+  .login { max-width: 360px; margin: 10vh auto; }
+  .login h1 { margin: 0 0 4px; font-size: 22px; }
+  .login p { color: var(--muted); margin: 0 0 18px; }
+  .login label { display: block; margin: 12px 0 4px; font-size: 14px; color: var(--muted); }
+  .err { color: var(--red); min-height: 1.4em; margin-top: 10px; font-size: 14px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar input { max-width: 340px; }
+  .stats { color: var(--muted); font-size: 14px; margin-left: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+  td.actions { text-align: right; white-space: nowrap; }
+  td.actions button { margin-left: 6px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--off); margin-right: 6px; }
+  .dot.on { background: var(--ok); }
+  .sub { color: var(--muted); font-size: 13px; }
+  .mono { font-family: ui-monospace, Consolas, monospace; }
+  .tablewrap { overflow-x: auto; }
+  dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); max-width: 460px; width: calc(100% - 32px); }
+  dialog::backdrop { background: rgba(0,0,0,.35); }
+  dialog label { display: block; margin: 10px 0 4px; font-size: 14px; color: var(--muted); }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .hidden { display: none !important; }
+  h2 { font-size: 18px; margin: 0 0 12px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) {
+    .grid2 { grid-template-columns: 1fr; }
+    .hide-sm { display: none; }
+    header { flex-wrap: wrap; }
+    header .who { margin-left: 0; width: 100%; }
+  }
+  .qr svg { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 8px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--card); padding: 10px 16px; border-radius: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <div class="card login">
+    <h1>Exelixisnet <span style="color:var(--red)">IT Support</span></h1>
+    <p>Technician login</p>
+    <form id="loginForm">
+      <label for="lu">Username</label><input id="lu" autocomplete="username" required>
+      <label for="lp">Password</label><input id="lp" type="password" autocomplete="current-password" required>
+      <div id="codeWrap" class="hidden"><label for="lc">2FA code</label><input id="lc" inputmode="numeric" autocomplete="one-time-code"></div>
+      <div style="margin-top:16px"><button class="btn" style="width:100%">Log in</button></div>
+      <div class="err" id="loginErr"></div>
+    </form>
+  </div>
+</section>
+
+<section id="app" class="hidden">
+  <header>
+    <div class="brand">Exelixisnet <span>IT Support</span></div>
+    <nav>
+      <button data-tab="devices" class="on">Customers</button>
+      <button data-tab="account">My account</button>
+      <button data-tab="users" class="admin-only">Technicians</button>
+      <button data-tab="audit" class="admin-only">Activity</button>
+    </nav>
+    <div class="who"><span id="whoName"></span><button class="btn ghost" id="logout">Log out</button></div>
+  </header>
+  <main>
+    <div id="tab-devices">
+      <div class="toolbar">
+        <input id="search" placeholder="Search name, PC, ID, phone…" autocomplete="off">
+        <label class="sub" style="display:flex;gap:6px;align-items:center;white-space:nowrap"><input type="checkbox" id="onlyOnline" style="width:auto"> Online only</label>
+        <span class="stats" id="stats"></span>
+      </div>
+      <div class="card tablewrap">
+        <table>
+          <thead><tr><th>Customer</th><th>ID</th><th class="hide-sm">PC</th><th class="hide-sm">Last seen</th><th></th></tr></thead>
+          <tbody id="devRows"></tbody>
+        </table>
+        <div id="devEmpty" class="sub hidden" style="padding:14px 8px">No customers yet. They appear here when someone installs the app.</div>
+      </div>
+    </div>
+
+    <div id="tab-account" class="hidden grid2">
+      <div class="card">
+        <h2>Change password</h2>
+        <form id="pwForm">
+          <label class="sub">Current password</label><input type="password" id="pwCur" required autocomplete="current-password">
+          <label class="sub" style="display:block;margin-top:10px">New password (at least 10 characters)</label><input type="password" id="pwNew" minlength="10" required autocomplete="new-password">
+          <div style="margin-top:14px"><button class="btn">Save</button></div>
+          <div class="err" id="pwErr"></div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Two-factor login</h2>
+        <div id="tfaOn" class="hidden"><p>Two-factor login is <b>on</b>. To reset it, ask an administrator.</p></div>
+        <div id="tfaOff">
+          <p class="sub">Strongly recommended: this panel holds access to every customer PC.</p>
+          <button class="btn" id="tfaStart">Turn on</button>
+          <div id="tfaSetup" class="hidden" style="margin-top:12px">
+            <p class="sub">Scan with Google Authenticator, Microsoft Authenticator or similar, then type the 6-digit code.</p>
+            <div class="qr" id="tfaQr"></div>
+            <p class="sub mono" id="tfaSecret"></p>
+            <div style="display:flex;gap:8px"><input id="tfaCode" inputmode="numeric" placeholder="123456"><button class="btn" id="tfaConfirm">Confirm</button></div>
+            <div class="err" id="tfaErr"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-users" class="hidden">
+      <div class="toolbar"><button class="btn" id="addUser">Add technician</button></div>
+      <div class="card tablewrap">
+        <table>
+          <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>2FA</th><th>Status</th><th></th></tr></thead>
+          <tbody id="userRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="tab-audit" class="hidden">
+      <div class="card tablewrap">
+        <table>
+          <thead><tr><th>When</th><th>Who</th><th>Action</th><th>ID</th><th>Detail</th></tr></thead>
+          <tbody id="auditRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</section>
+
+<dialog id="devDlg">
+  <h2>Customer details</h2>
+  <form method="dialog" id="devForm">
+    <p class="sub mono" id="dlgId"></p>
+    <label>Name / company</label><input id="dlgName" maxlength="120" required>
+    <label>Phone</label><input id="dlgPhone" maxlength="40">
+    <label>Notes</label><textarea id="dlgNotes" rows="3" maxlength="2000"></textarea>
+    <label>Permanent password</label>
+    <div style="display:flex;gap:8px"><input id="dlgPw" class="mono" readonly placeholder="hidden"><button type="button" class="btn ghost" id="dlgReveal">Show</button></div>
+    <div class="row">
+      <button type="button" class="btn danger admin-only" id="dlgDelete" style="margin-right:auto">Remove</button>
+      <button type="button" class="btn ghost" id="dlgCancel">Cancel</button>
+      <button class="btn" id="dlgSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="userDlg">
+  <h2 id="userDlgTitle">Technician</h2>
+  <form method="dialog" id="userForm">
+    <label>Username</label><input id="uUser" maxlength="40" required>
+    <label>Full name</label><input id="uName" maxlength="80">
+    <label id="uPwLabel">Password (at least 10 characters)</label><input id="uPw" type="password" minlength="10" autocomplete="new-password">
+    <label>Role</label><select id="uRole"><option value="tech">Technician</option><option value="admin">Administrator</option></select>
+    <label id="uActiveWrap" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="uActive" style="width:auto"> Active</label>
+    <label id="uResetWrap" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="uReset2fa" style="width:auto"> Reset 2FA</label>
+    <div class="err" id="userErr"></div>
+    <div class="row"><button type="button" class="btn ghost" id="uCancel">Cancel</button><button class="btn">Save</button></div>
+  </form>
+</dialog>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let me = null, devices = [], editId = null, editUser = null;
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    method: opts.method || 'GET',
+    headers: opts.body ? { 'Content-Type': 'application/json' } : {},
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    credentials: 'same-origin',
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    const err = new Error((data && data.detail) || res.statusText);
+    err.status = res.status; err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+function toast(msg) {
+  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2500);
+}
+
+function ago(ts) {
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 90) return 'just now';
+  if (s < 3600) return Math.round(s / 60) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' h ago';
+  return new Date(ts * 1000).toLocaleDateString();
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+// --- login ---
+$('#loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault(); $('#loginErr').textContent = '';
+  try {
+    await api('/api/login', { method: 'POST', body: { username: $('#lu').value, password: $('#lp').value, code: $('#lc').value } });
+    start();
+  } catch (err) {
+    if (err.data && err.data.need_code) { $('#codeWrap').classList.remove('hidden'); $('#lc').focus(); return; }
+    $('#loginErr').textContent = err.message;
+  }
+});
+$('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.reload(); };
+
+async function start() {
+  try { me = await api('/api/me'); } catch (e) { $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); return; }
+  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  $('#whoName').textContent = me.full_name || me.username;
+  document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', me.role !== 'admin'));
+  $('#tfaOn').classList.toggle('hidden', !me.totp); $('#tfaOff').classList.toggle('hidden', me.totp);
+  loadDevices(); setInterval(loadDevices, 30000);
+}
+
+// --- tabs ---
+document.querySelectorAll('header nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('header nav button').forEach(x => x.classList.toggle('on', x === b));
+  ['devices', 'account', 'users', 'audit'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  if (b.dataset.tab === 'users') loadUsers();
+  if (b.dataset.tab === 'audit') loadAudit();
+});
+
+// --- devices ---
+async function loadDevices() {
+  try { devices = await api('/api/devices'); } catch (e) { if (e.status === 401) location.reload(); return; }
+  renderDevices();
+}
+function renderDevices() {
+  const q = $('#search').value.trim().toLowerCase();
+  const onlyOn = $('#onlyOnline').checked;
+  const rows = devices.filter(d => (!onlyOn || d.online) &&
+    (!q || [d.name, d.id, d.hostname, d.phone, d.notes].join(' ').toLowerCase().includes(q)));
+  rows.sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name));
+  const on = devices.filter(d => d.online).length;
+  $('#stats').textContent = `${on} online · ${devices.length} total`;
+  $('#devEmpty').classList.toggle('hidden', devices.length > 0);
+  $('#devRows').innerHTML = rows.map(d => `
+    <tr>
+      <td><span class="dot ${d.online ? 'on' : ''}"></span><b>${esc(d.name)}</b>${d.phone ? `<div class="sub">${esc(d.phone)}</div>` : ''}</td>
+      <td class="mono">${esc(d.id)}</td>
+      <td class="hide-sm">${esc(d.hostname)}<div class="sub">${esc(d.os)}</div></td>
+      <td class="hide-sm">${d.online ? 'Online' : ago(d.last_seen)}</td>
+      <td class="actions">
+        <button class="btn" data-connect="${esc(d.id)}" ${d.has_password ? '' : 'title="No password stored: you will be asked for one"'}>Connect</button>
+        <button class="btn ghost" data-edit="${esc(d.id)}">Details</button>
+      </td>
+    </tr>`).join('');
+}
+$('#search').oninput = renderDevices; $('#onlyOnline').onchange = renderDevices;
+$('#devRows').addEventListener('click', async (e) => {
+  const c = e.target.closest('[data-connect]'), ed = e.target.closest('[data-edit]');
+  if (c) {
+    try { const r = await api(`/api/devices/${encodeURIComponent(c.dataset.connect)}/connect`, { method: 'POST' }); window.location.href = r.link; }
+    catch (err) { toast(err.message); }
+  }
+  if (ed) openDevice(ed.dataset.edit);
+});
+function openDevice(id) {
+  const d = devices.find(x => x.id === id); if (!d) return;
+  editId = id; $('#dlgId').textContent = `ID ${d.id} · ${d.hostname} · app ${d.app_version}`;
+  $('#dlgName').value = d.name; $('#dlgPhone').value = d.phone; $('#dlgNotes').value = d.notes; $('#dlgPw').value = '';
+  $('#devDlg').showModal();
+}
+$('#dlgReveal').onclick = async () => {
+  try { const r = await api(`/api/devices/${encodeURIComponent(editId)}/reveal`, { method: 'POST' }); $('#dlgPw').value = r.password || '(none stored)'; }
+  catch (err) { toast(err.message); }
+};
+$('#dlgCancel').onclick = () => $('#devDlg').close();
+$('#devForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await api(`/api/devices/${encodeURIComponent(editId)}`, { method: 'PATCH', body: { name: $('#dlgName').value, phone: $('#dlgPhone').value, notes: $('#dlgNotes').value } });
+    $('#devDlg').close(); loadDevices(); toast('Saved');
+  } catch (err) { toast(err.message); }
+});
+$('#dlgDelete').onclick = async () => {
+  if (!confirm('Remove this customer PC from the list? If the app is still installed it will register again.')) return;
+  try { await api(`/api/devices/${encodeURIComponent(editId)}`, { method: 'DELETE' }); $('#devDlg').close(); loadDevices(); }
+  catch (err) { toast(err.message); }
+};
+
+// --- account ---
+$('#pwForm').addEventListener('submit', async (e) => {
+  e.preventDefault(); $('#pwErr').textContent = '';
+  try { await api('/api/me/password', { method: 'POST', body: { current: $('#pwCur').value, new: $('#pwNew').value } }); e.target.reset(); toast('Password changed'); }
+  catch (err) { $('#pwErr').textContent = err.message; }
+});
+$('#tfaStart').onclick = async () => {
+  const r = await api('/api/me/2fa/start', { method: 'POST' });
+  $('#tfaQr').innerHTML = r.svg; $('#tfaSecret').textContent = r.secret;
+  $('#tfaSetup').classList.remove('hidden'); $('#tfaStart').classList.add('hidden');
+};
+$('#tfaConfirm').onclick = async () => {
+  $('#tfaErr').textContent = '';
+  try { await api('/api/me/2fa/confirm', { method: 'POST', body: { code: $('#tfaCode').value } }); me.totp = true;
+    $('#tfaOn').classList.remove('hidden'); $('#tfaOff').classList.add('hidden'); toast('Two-factor login is on'); }
+  catch (err) { $('#tfaErr').textContent = err.message; }
+};
+
+// --- users ---
+let users = [];
+async function loadUsers() {
+  users = await api('/api/users');
+  $('#userRows').innerHTML = users.map(u => `
+    <tr><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${u.role === 'admin' ? 'Administrator' : 'Technician'}</td>
+    <td>${u.totp ? 'On' : '<span class="sub">Off</span>'}</td><td>${u.active ? 'Active' : '<span class="sub">Disabled</span>'}</td>
+    <td class="actions"><button class="btn ghost" data-user="${u.id}">Edit</button></td></tr>`).join('');
+}
+$('#addUser').onclick = () => openUser(null);
+$('#userRows').addEventListener('click', (e) => { const b = e.target.closest('[data-user]'); if (b) openUser(users.find(u => u.id == b.dataset.user)); });
+function openUser(u) {
+  editUser = u; $('#userErr').textContent = '';
+  $('#userDlgTitle').textContent = u ? 'Edit technician' : 'Add technician';
+  $('#uUser').value = u ? u.username : ''; $('#uUser').disabled = !!u;
+  $('#uName').value = u ? u.full_name : ''; $('#uPw').value = ''; $('#uPw').required = !u;
+  $('#uPwLabel').textContent = u ? 'New password (leave empty to keep)' : 'Password (at least 10 characters)';
+  $('#uRole').value = u ? u.role : 'tech';
+  $('#uActive').checked = u ? !!u.active : true; $('#uActiveWrap').classList.toggle('hidden', !u);
+  $('#uReset2fa').checked = false; $('#uResetWrap').classList.toggle('hidden', !u || !u.totp);
+  $('#userDlg').showModal();
+}
+$('#uCancel').onclick = () => $('#userDlg').close();
+$('#userForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    if (editUser) {
+      const body = { full_name: $('#uName').value, role: $('#uRole').value, active: $('#uActive').checked, reset_2fa: $('#uReset2fa').checked };
+      if ($('#uPw').value) body.password = $('#uPw').value;
+      await api(`/api/users/${editUser.id}`, { method: 'PATCH', body });
+    } else {
+      await api('/api/users', { method: 'POST', body: { username: $('#uUser').value, full_name: $('#uName').value, password: $('#uPw').value, role: $('#uRole').value } });
+    }
+    $('#userDlg').close(); loadUsers();
+  } catch (err) { $('#userErr').textContent = err.message; }
+});
+
+// --- audit ---
+async function loadAudit() {
+  const rows = await api('/api/audit');
+  $('#auditRows').innerHTML = rows.map(r => `<tr><td class="sub">${new Date(r.ts * 1000).toLocaleString()}</td>
+    <td>${esc(r.actor)}</td><td>${esc(r.action)}</td><td class="mono">${esc(r.rd_id)}</td><td class="sub">${esc(r.detail)}</td></tr>`).join('');
+}
+
+start();
+</script>
+</body>
+</html>
