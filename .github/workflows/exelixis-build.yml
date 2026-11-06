@@ -1,0 +1,21 @@
+name: Exelixisnet IT Support - Windows build
+
+# Run manually from the Actions tab: "Exelixisnet IT Support - Windows build" -> "Run workflow".
+# Builds the Windows client with our server (rustdesk.exelixisnet.gr) and key built in,
+# and publishes the installer to the "exelixis" pre-release on this repository.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "exelixis"
+      publish-update-metadata: false
+      windows-only: true
