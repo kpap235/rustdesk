@@ -24,6 +24,7 @@ import qrcode.image.svg
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # --- configuration (environment) -------------------------------------------
@@ -42,6 +43,7 @@ ISSUER = "Exelixisnet IT Support"
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 app = FastAPI(title="Exelixisnet IT Support panel", docs_url=None, redoc_url=None)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 _db_lock = threading.Lock()
 
 
