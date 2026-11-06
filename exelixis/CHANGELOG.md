@@ -24,6 +24,8 @@ Based on RustDesk (AGPL-3.0); the RustDesk version each release is built on is s
   itself if the panel was offline or the computer's ID changed.
 - Automatic updates from the stock RustDesk are switched off.
 - Android app installs next to the stock RustDesk (package `eu.exelixisnet.itsupport`).
+- Fixed: installing on Windows stopped with "Windows cannot find ...ExelixisnetITSupport.exe"
+  (the test build before 1.0.0 did not rename the program file during installation).
 
 ### Support panel (rustdesk.exelixisnet.gr)
 - Customer list with search, online/offline filter and one-click **Connect**.
