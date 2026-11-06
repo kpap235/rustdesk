@@ -10,6 +10,14 @@ const _kRed = Color(0xFFC21F3A);
 
 bool _exelixisDialogShown = false;
 
+String _exelixisVersion() {
+  try {
+    return bind.exelixisVersion();
+  } catch (_) {
+    return '';
+  }
+}
+
 /// Shows the name window if this installed copy has not registered yet.
 /// Safe to call repeatedly: it opens at most once per app start.
 Future<void> exelixisMaybeAskName(BuildContext context) async {
@@ -166,6 +174,8 @@ Widget exelixisSupportContact(BuildContext context) {
     child: Column(children: [
       Text('IT Support', style: style.copyWith(fontWeight: FontWeight.w600)),
       SelectableText('$kExelixisPhone  ·  $kExelixisEmail', style: style),
+      Text('Version ${_exelixisVersion()}',
+          style: style.copyWith(fontSize: 11)),
     ]),
   );
 }

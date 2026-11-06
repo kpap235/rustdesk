@@ -39,6 +39,7 @@ ONLINE_SECONDS = int(os.environ.get("PANEL_ONLINE_SECONDS", "180"))
 SESSION_HOURS = int(os.environ.get("PANEL_SESSION_HOURS", "12"))
 COOKIE_SECURE = os.environ.get("PANEL_COOKIE_SECURE", "1") == "1"
 ISSUER = "Exelixisnet IT Support"
+PANEL_VERSION = "1.0.0"  # keep in step with exelixis/VERSION and CHANGELOG.md
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -366,7 +367,7 @@ def logout(response: Response):
 @app.get("/api/me")
 def me(u=Depends(current_user)):
     return {"username": u["username"], "full_name": u["full_name"], "role": u["role"],
-            "totp": bool(u["totp_secret"])}
+            "totp": bool(u["totp_secret"]), "panel_version": PANEL_VERSION}
 
 
 @app.get("/api/devices")
@@ -569,7 +570,7 @@ def hub_edit(rd_id: str, body: DeviceEdit, x_hub_user: str = Header(default="use
 # --- web page ----------------------------------------------------------------
 @app.get("/healthz")
 def healthz():
-    return {"ok": True}
+    return {"ok": True, "version": PANEL_VERSION}
 
 
 @app.get("/")

@@ -1,8 +1,8 @@
 name: Exelixisnet IT Support - build (Windows + Android)
 
-# Run manually from the Actions tab: "Exelixisnet IT Support - build (Windows + Android)" -> "Run workflow".
-# Builds the Windows client with our server (rustdesk.exelixisnet.gr) and key built in,
-# and publishes the installer to the "exelixis" pre-release on this repository.
+# Run manually: Actions -> "Exelixisnet IT Support - build (Windows + Android)" -> Run workflow.
+# Builds with our server and key built in and publishes release vX.Y.Z, where X.Y.Z is
+# exelixis/VERSION and the release notes are that version's section in exelixis/CHANGELOG.md.
 
 on:
   workflow_dispatch:
@@ -16,12 +16,68 @@ permissions:
   contents: write
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Read version and check it is new
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(tr -d ' \r\n' < exelixis/VERSION)
+          echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::exelixis/VERSION must look like 1.2.3 (found '$V')"; exit 1; }
+          grep -q "^## $V " exelixis/CHANGELOG.md || { echo "::error::exelixis/CHANGELOG.md has no '## $V' section - describe the changes first"; exit 1; }
+          if gh release view "v$V" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Version $V was already released. Raise exelixis/VERSION and add a CHANGELOG section."; exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: version
     uses: ./.github/workflows/flutter-build.yml
     secrets: inherit
     with:
       upload-artifact: true
-      upload-tag: "exelixis"
+      upload-tag: "exelixis-staging"
       publish-update-metadata: false
       windows-only: true
       with-android: ${{ inputs.android }}
+      exelixis-version: ${{ needs.version.outputs.version }}
+
+  publish:
+    needs: [version, build]
+    if: ${{ !cancelled() && needs.version.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      V: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Collect, rename and publish v${{ env.V }}
+        run: |
+          mkdir dist
+          gh release download exelixis-staging -R "$GITHUB_REPOSITORY" -D staging
+          for f in staging/*; do
+            n=$(basename "$f")
+            case "$n" in
+              *-x86_64.exe)    t="ExelixisnetITSupport-$V-windows-x64.exe" ;;
+              *-aarch64.exe)   t="ExelixisnetITSupport-$V-windows-arm64.exe" ;;
+              *-aarch64.apk)   t="ExelixisnetITSupport-$V-android-arm64.apk" ;;
+              *-armv7.apk)     t="ExelixisnetITSupport-$V-android-armv7.apk" ;;
+              *-x86_64.apk)    t="ExelixisnetITSupport-$V-android-x86_64.apk" ;;
+              *-universal.apk) t="ExelixisnetITSupport-$V-android-universal.apk" ;;
+              *) continue ;;   # .msi not published until it carries the new name
+            esac
+            cp "$f" "dist/$t"
+          done
+          ls -l dist
+          [ -n "$(ls dist)" ] || { echo "::error::No build files were produced"; exit 1; }
+          # Release notes: this version's section of the change log
+          awk -v v="$V" '$0 ~ "^## "v" " {on=1; next} /^## / {on=0} on' exelixis/CHANGELOG.md > notes.md
+          RD=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          printf '\n---\nBuilt on RustDesk %s. Use the **windows-x64.exe** for PCs and the **android-arm64.apk** (or universal) for phones.\n' "$RD" >> notes.md
+          gh release create "v$V" dist/* -R "$GITHUB_REPOSITORY" --title "Exelixisnet IT Support $V" --notes-file notes.md --target "$GITHUB_SHA"
+          gh release delete exelixis-staging -R "$GITHUB_REPOSITORY" --cleanup-tag -y || true

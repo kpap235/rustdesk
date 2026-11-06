@@ -119,6 +119,7 @@
   .rail-foot strong { display: block; color: #fff; font-size: 14px; }
   .rail-foot button { margin-top: 10px; background: none; border: 1px solid #36558C; color: #DCE6F7; border-radius: var(--radius-s); padding: 6px 10px; cursor: pointer; }
   .rail-foot button:hover { border-color: #DCE6F7; }
+  .rail-foot .ver { display: block; margin-top: 12px; font-size: 11px; color: #7F93B8; }
 
   main { padding: 28px clamp(16px, 3vw, 40px) 60px; max-width: 1180px; width: 100%; }
   .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -264,6 +265,7 @@
       <span>Signed in as</span>
       <strong id="whoName"></strong>
       <button id="logout">Sign out</button>
+      <span class="ver" id="panelVer"></span>
     </div>
   </aside>
 
@@ -452,6 +454,7 @@ async function start() {
   catch (e) { $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); $('#lu').focus(); return; }
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   $('#whoName').textContent = me.full_name || me.username;
+  $('#panelVer').textContent = me.panel_version ? `Panel version ${me.panel_version}` : '';
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', me.role !== 'admin'));
   $('#tfaOn').classList.toggle('hidden', !me.totp); $('#tfaOff').classList.toggle('hidden', me.totp);
   loadDevices(); setInterval(loadDevices, 30000);

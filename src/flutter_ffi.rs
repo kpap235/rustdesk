@@ -3201,3 +3201,8 @@ pub fn exelixis_needs_registration() -> SyncReturn<bool> {
 pub fn exelixis_register(name: String, phone: String) -> String {
     crate::exelixis::register(name, phone)
 }
+
+/// Exelixisnet release number shown on the home page, e.g. "1.0.0 (RustDesk 1.5.1)".
+pub fn exelixis_version() -> SyncReturn<String> {
+    SyncReturn(crate::exelixis::version_text())
+}

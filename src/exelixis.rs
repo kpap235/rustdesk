@@ -29,6 +29,10 @@ const ENROLL_TOKEN: &str = match option_env!("EXELIXIS_ENROLL_TOKEN") {
     Some(v) => v,
     None => "",
 };
+const EXELIXIS_VERSION: &str = match option_env!("EXELIXIS_VERSION") {
+    Some(v) => v,
+    None => "dev",
+};
 const HEARTBEAT_SECS: u64 = 60;
 
 pub const OPT_NAME: &str = "exelixis-name";
@@ -46,6 +50,12 @@ pub fn display_name() -> String {
     } else {
         name
     }
+}
+
+/// Our release number plus the RustDesk version it is built on, e.g. "1.0.0 (RustDesk 1.5.1)".
+pub fn version_text() -> String {
+    let ours = if EXELIXIS_VERSION.is_empty() { "dev" } else { EXELIXIS_VERSION };
+    format!("{} (RustDesk {})", ours, crate::VERSION)
 }
 
 fn hostname() -> String {
@@ -86,7 +96,7 @@ async fn register_remote(id: &str, name: &str, phone: &str, password: &str) -> R
         "phone": phone,
         "hostname": hostname(),
         "os": os_name(),
-        "version": crate::VERSION,
+        "version": version_text(),
         "password": password,
     });
     let (status, text) = post("/api/client/register", body, true).await?;
@@ -218,7 +228,7 @@ async fn heartbeat_once() -> ResultType<()> {
         let mut body = json!({
             "id": id,
             "secret": secret,
-            "version": crate::VERSION,
+            "version": version_text(),
             "hostname": hostname(),
         });
         if !last_id.is_empty() && last_id != id {
