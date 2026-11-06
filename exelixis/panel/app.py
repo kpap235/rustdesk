@@ -32,6 +32,7 @@ SESSION_SECRET = os.environ["PANEL_SESSION_SECRET"].encode()
 FERNET = Fernet(os.environ["PANEL_FERNET_KEY"].encode())
 ENROLL_TOKEN = os.environ["PANEL_ENROLL_TOKEN"]
 HUB_API_KEY = os.environ.get("PANEL_HUB_API_KEY", "")
+MONITOR_API_KEY = os.environ.get("PANEL_MONITOR_API_KEY", "")
 APP_URI = os.environ.get("PANEL_APP_URI", "exelixisnetitsupport")
 ONLINE_SECONDS = int(os.environ.get("PANEL_ONLINE_SECONDS", "180"))
 SESSION_HOURS = int(os.environ.get("PANEL_SESSION_HOURS", "12"))
@@ -207,9 +208,12 @@ def admin_user(u=Depends(current_user)) -> sqlite3.Row:
     return u
 
 
-def hub_auth(x_api_key: str = Header(default="")) -> None:
-    if not HUB_API_KEY or not hmac.compare_digest(x_api_key, HUB_API_KEY):
-        raise HTTPException(401, "Bad API key")
+def hub_auth(x_api_key: str = Header(default="")) -> str:
+    """API key for other Exelixisnet systems. Returns which system is calling."""
+    for name, key in (("hub", HUB_API_KEY), ("monitor", MONITOR_API_KEY)):
+        if key and hmac.compare_digest(x_api_key, key):
+            return name
+    raise HTTPException(401, "Bad API key")
 
 
 # --- device helpers ----------------------------------------------------------
@@ -227,6 +231,7 @@ def device_view(r: sqlite3.Row) -> dict:
         "last_seen": r["last_seen"],
         "created": r["created"],
         "has_password": bool(r["pw_enc"]),
+        "last_ip": r["last_ip"],
     }
 
 
@@ -534,27 +539,28 @@ def me_2fa_confirm(body: CodeIn, u=Depends(current_user)):
 # --- ExelixisHub API (API key) ----------------------------------------------
 @app.get("/api/hub/devices", dependencies=[Depends(hub_auth)])
 def hub_devices():
+    """Also used by the MikroTik VPN Monitoring site (with its own key)."""
     with db() as c:
         rows = c.execute("SELECT * FROM devices ORDER BY name COLLATE NOCASE").fetchall()
     return [device_view(r) for r in rows]
 
 
-@app.post("/api/hub/devices/{rd_id}/connect", dependencies=[Depends(hub_auth)])
-def hub_connect(rd_id: str, x_hub_user: str = Header(default="hub")):
+@app.post("/api/hub/devices/{rd_id}/connect")
+def hub_connect(rd_id: str, x_hub_user: str = Header(default="user"), source: str = Depends(hub_auth)):
     r = get_device(rd_id)
-    audit(f"hub:{x_hub_user[:60]}", "connect", rd_id, r["name"])
+    audit(f"{source}:{x_hub_user[:60]}", "connect", rd_id, r["name"])
     return {"link": connect_link(rd_id, dec(r["pw_enc"]))}
 
 
-@app.patch("/api/hub/devices/{rd_id}", dependencies=[Depends(hub_auth)])
-def hub_edit(rd_id: str, body: DeviceEdit, x_hub_user: str = Header(default="hub")):
+@app.patch("/api/hub/devices/{rd_id}")
+def hub_edit(rd_id: str, body: DeviceEdit, x_hub_user: str = Header(default="user"), source: str = Depends(hub_auth)):
     get_device(rd_id)
     fields = {k: v.strip() for k, v in body.model_dump().items() if v is not None}
     if fields:
         sets = ", ".join(f"{k}=?" for k in fields)
         with db() as c:
             c.execute(f"UPDATE devices SET {sets} WHERE rd_id=?", (*fields.values(), rd_id))
-        audit(f"hub:{x_hub_user[:60]}", "edit", rd_id, json.dumps(fields, ensure_ascii=False))
+        audit(f"{source}:{x_hub_user[:60]}", "edit", rd_id, json.dumps(fields, ensure_ascii=False))
     return {"ok": True}
 
 
