@@ -21,7 +21,21 @@ PUB_KEY = "OMTaNaukuebffcMIkLStsdfGx6bP0vgtJ68bRpX7Ec0="
 APP_NAME = "ExelixisnetITSupport"
 # ---------------------------------------------------------------------------
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+def _find_root() -> str:
+    # CI runs this file through exec() from the repository root, where
+    # __file__ points at a temporary script, so try the working directory too.
+    candidates = [os.getcwd()]
+    try:
+        candidates.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+    except NameError:
+        pass
+    for c in candidates:
+        if os.path.exists(os.path.join(c, "libs", "hbb_common", "src", "config.rs")):
+            return c
+    return candidates[-1]
+
+
+ROOT = _find_root()
 CONFIG_RS = os.path.join(ROOT, "libs", "hbb_common", "src", "config.rs")
 
 PATCHES = [
