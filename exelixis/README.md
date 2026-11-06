@@ -8,12 +8,12 @@ Based on [RustDesk](https://github.com/rustdesk/rustdesk) (AGPL-3.0); this fork'
 | What | Where |
 |---|---|
 | Built-in server `rustdesk.exelixisnet.gr`, public key, internal app name | `res/exelixis/apply.py` (applied by CI after checkout) |
-| Icons and logo (from `res/exelixis/atom.png`, `exelixisnet-logo.png`) | `res/exelixis/make_icons.py` |
+| Icons and logo (from `res/exelixis/app-icon.jpg`, `exelixisnet-logo.png`) | `res/exelixis/make_icons.py` |
 | Name window after install, permanent password, panel registration, heartbeat | `src/exelixis.rs`, `flutter/lib/desktop/widgets/exelixis_register.dart` |
 | Windows + Android build | Actions → "Exelixisnet IT Support - build (Windows + Android)" |
 
 The build needs the repository secret **`EXELIXIS_ENROLL_TOKEN`**; the Android app also needs `ANDROID_SIGNING_KEY`, `ANDROID_ALIAS`, `ANDROID_KEY_STORE_PASSWORD`, `ANDROID_KEY_PASSWORD` (Settings → Secrets and variables → Actions).
-It must match `PANEL_ENROLL_TOKEN` in the panel's `.env`. Without it the app works but never registers.
+`EXELIXIS_ENROLL_TOKEN` must match `PANEL_ENROLL_TOKEN` in the panel's `.env`. Without it the app works but never registers.
 
 ## Support panel (`exelixis/panel`)
 
