@@ -13,7 +13,11 @@ on:
         type: boolean
         default: false
       windows-only:
-        # Exelixisnet: build only the Windows client
+        # Exelixisnet: build only the Windows client...
+        type: boolean
+        default: false
+      with-android:
+        # Exelixisnet: ...plus Android when this is true
         type: boolean
         default: false
 
@@ -1428,7 +1432,7 @@ jobs:
           files: rustdesk-${{ env.VERSION }}-unsigned.tar.gz
 
   build-rustdesk-android:
-    if: ${{ !inputs.windows-only }}
+    if: ${{ !inputs.windows-only || inputs.with-android }}
     needs: [generate-bridge]
     name: build rustdesk android apk ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}

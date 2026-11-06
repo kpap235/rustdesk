@@ -1,11 +1,16 @@
-name: Exelixisnet IT Support - Windows build
+name: Exelixisnet IT Support - build (Windows + Android)
 
-# Run manually from the Actions tab: "Exelixisnet IT Support - Windows build" -> "Run workflow".
+# Run manually from the Actions tab: "Exelixisnet IT Support - build (Windows + Android)" -> "Run workflow".
 # Builds the Windows client with our server (rustdesk.exelixisnet.gr) and key built in,
 # and publishes the installer to the "exelixis" pre-release on this repository.
 
 on:
   workflow_dispatch:
+    inputs:
+      android:
+        description: "Also build the Android app"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -19,3 +24,4 @@ jobs:
       upload-tag: "exelixis"
       publish-update-metadata: false
       windows-only: true
+      with-android: ${{ inputs.android }}
