@@ -779,6 +779,7 @@ function pcRow(d) {
       <div class="main">
         <div class="nm"><strong>${esc(d.name)}</strong>${badges}</div>
         <div class="ips">${esc(d.local_ip || '—')}${d.last_ip ? ' · WAN ' + esc(d.last_ip) : ''}</div>
+        ${d.os || d.ram || d.disk ? `<div class="ips sys">${esc(d.os || '')}${d.ram ? ' · ' + esc(d.ram) + ' RAM' : ''}${d.disk ? ' · ' + esc(d.disk) : ''}</div>` : ''}
         <span class="rid">ID ${esc(fmtId(d.id))}</span>
       </div>
       <div class="cust">${d.customer_name ? `<span class="c">${esc(d.customer_name)}</span>` : ''}${d.phone ? `<span class="p">${esc(d.phone)}</span>` : ''}</div>

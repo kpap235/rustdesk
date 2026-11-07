@@ -11,6 +11,7 @@ To release a panel change: add a section here, then update the VPS.
 - **"In session" indicator** shows which computers a technician is connected to right now.
 - **Sessions page:** the full time log — add a note per session and untick one to exclude it from
   billing (the dashboard then charges only billable time). Visible to supervisors and admins.
+- Each computer row now shows its **Windows version, RAM and disk** at a glance (not only in Details).
 
 ## 1.8.0 — 2026-11-07
 - New **Supervisor** role between Administrator and Technician: supervisors manage technicians and
