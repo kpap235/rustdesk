@@ -158,6 +158,8 @@
   .pill.live { background: var(--live-soft); color: var(--live); }
   .pill.live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 2s ease-in-out infinite; }
   .pill.idle { color: var(--muted); padding-left: 0; }
+  .pill.kind-q { background: rgba(194,31,58,.12); color: #C21F3A; font-size: 11px; padding: 1px 8px; margin-left: 8px; }
+  .pill.kind-f { background: rgba(11,79,163,.12); color: #0B4FA3; font-size: 11px; padding: 1px 8px; margin-left: 8px; }
   @keyframes pulse { 50% { opacity: .35; } }
   @media (prefers-reduced-motion: reduce) { .pill.live::before { animation: none; } }
   .pc .act { display: flex; gap: 8px; }
@@ -347,17 +349,26 @@
       <div class="page-head"><div><h1 class="slant">Downloads</h1><p>Links to the app for customers. Copy a link and send it by e-mail, Viber or SMS.</p></div></div>
       <div class="dl-list">
         <div class="panel dl">
-          <h2>Windows</h2>
-          <p class="lead">For PCs and laptops. The customer runs it and clicks Install.</p>
+          <h2>exSupport — technicians (Windows)</h2>
+          <p class="lead">The full program, for you and your technicians. Install it on your own PC.</p>
           <div class="dl-row">
-            <input id="dlWin" type="url" readonly aria-label="Windows download link">
-            <button class="btn btn-primary" data-copy="dlWin">Copy link</button>
-            <a class="btn btn-quiet" id="dlWinOpen" target="_blank" rel="noopener">Download</a>
+            <input id="dlExs" type="url" readonly aria-label="exSupport download link">
+            <button class="btn btn-primary" data-copy="dlExs">Copy link</button>
+            <a class="btn btn-quiet" id="dlExsOpen" target="_blank" rel="noopener">Download</a>
           </div>
         </div>
         <div class="panel dl">
-          <h2>Android</h2>
-          <p class="lead">For phones and tablets. The customer opens it on the phone and allows the installation.</p>
+          <h2>exQuickSupport — customers (Windows)</h2>
+          <p class="lead">Send this to a customer. It runs without installing; they read you the one-time code.</p>
+          <div class="dl-row">
+            <input id="dlQk" type="url" readonly aria-label="exQuickSupport Windows download link">
+            <button class="btn btn-primary" data-copy="dlQk">Copy link</button>
+            <a class="btn btn-quiet" id="dlQkOpen" target="_blank" rel="noopener">Download</a>
+          </div>
+        </div>
+        <div class="panel dl">
+          <h2>exQuickSupport — customers (Android)</h2>
+          <p class="lead">For phones and tablets. The customer opens it and follows the Guide tab to allow access.</p>
           <div class="dl-row">
             <input id="dlAnd" type="url" readonly aria-label="Android download link">
             <button class="btn btn-primary" data-copy="dlAnd">Copy link</button>
@@ -367,8 +378,9 @@
         <div class="panel dl">
           <h2>Short links and setup guide</h2>
           <p class="lead">Send these to customers. They always lead to the links above, so they never change when a new version comes out.</p>
-          <div class="dl-row"><input id="slWin" readonly aria-label="Short Windows link"><button class="btn btn-quiet" data-copy="slWin">Copy</button></div>
+          <div class="dl-row"><input id="slQk" readonly aria-label="Short customer Windows link"><button class="btn btn-quiet" data-copy="slQk">Copy</button></div>
           <div class="dl-row" style="margin-top:8px"><input id="slAnd" readonly aria-label="Short Android link"><button class="btn btn-quiet" data-copy="slAnd">Copy</button></div>
+          <div class="dl-row" style="margin-top:8px"><input id="slExs" readonly aria-label="Short technician link"><button class="btn btn-quiet" data-copy="slExs">Copy</button></div>
           <div class="dl-row" style="margin-top:8px"><input id="slGuideEl" readonly aria-label="Greek setup guide link"><button class="btn btn-quiet" data-copy="slGuideEl">Copy</button><a class="btn btn-quiet" href="/guide/el" target="_blank" rel="noopener">Open guide (Ελληνικά)</a></div>
           <div class="dl-row" style="margin-top:8px"><input id="slGuideEn" readonly aria-label="English setup guide link"><button class="btn btn-quiet" data-copy="slGuideEn">Copy</button><a class="btn btn-quiet" href="/guide/en" target="_blank" rel="noopener">Open guide (English)</a></div>
         </div>
@@ -547,7 +559,7 @@ function renderDevices() {
   const q = $('#search').value.trim().toLowerCase();
   const rows = devices.filter(d =>
     (filter === 'all' || (filter === 'online') === d.online) &&
-    (!q || [d.name, d.id, d.hostname, d.phone, d.notes].join(' ').toLowerCase().includes(q)));
+    (!q || [d.name, d.id, d.hostname, d.phone, d.notes, d.local_ip, d.os_user].join(' ').toLowerCase().includes(q)));
   rows.sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name));
   const on = devices.filter(d => d.online).length;
   $('#navOnline').textContent = on;
@@ -560,8 +572,8 @@ function renderDevices() {
   $('#devRows').innerHTML = rows.map(d => `
     <li class="pc ${d.online ? 'live' : ''}">
       <span class="signal" aria-hidden="true"></span>
-      <div class="who"><strong>${esc(d.name)}</strong><span>${esc(d.phone || '')}</span></div>
-      <div class="machine"><div>${esc(d.hostname || '—')}</div><span class="rid">ID ${esc(fmtId(d.id))}</span></div>
+      <div class="who"><strong>${esc(d.name)}</strong>${d.kind === 'quick' ? '<span class="pill kind-q">Quick</span>' : d.kind === 'full' ? '<span class="pill kind-f">Full</span>' : ''}<span>${esc(d.phone || '')}</span></div>
+      <div class="machine"><div>${esc(d.hostname || '—')}${d.local_ip ? ' · ' + esc(d.local_ip) : ''}</div><span class="rid">ID ${esc(fmtId(d.id))}</span></div>
       <div class="state">${d.online ? '<span class="pill live">Online</span>' : `<span class="pill idle">Seen ${ago(d.last_seen)}</span>`}</div>
       <div class="act">
         <button class="btn btn-primary" data-connect="${esc(d.id)}" ${d.has_password ? '' : 'title="No password stored: you will be asked for one"'}>Connect</button>
@@ -592,7 +604,7 @@ function openDevice(id) {
   const d = devices.find(x => x.id === id); if (!d) return;
   editId = id;
   $('#dlgTitle').textContent = d.name;
-  $('#dlgId').textContent = `ID ${fmtId(d.id)} · ${d.hostname || 'unknown computer'} · ${d.os || ''} · app ${d.app_version || '?'}`;
+  $('#dlgId').textContent = `ID ${fmtId(d.id)} · ${d.hostname || 'unknown computer'}${d.local_ip ? ' (' + d.local_ip + ')' : ''}${d.os_user ? ' · user ' + d.os_user : ''} · ${d.os || ''} · app ${d.app_version || '?'}`;
   $('#dlgName').value = d.name; $('#dlgPhone').value = d.phone; $('#dlgNotes').value = d.notes; $('#dlgPw').value = '';
   $('#devDlg').showModal();
 }
@@ -677,20 +689,20 @@ $('#userForm').addEventListener('submit', async (e) => {
 });
 
 // ---------- downloads ----------
-let downloads = { windows: '', android: '' };
+let downloads = { exsupport: '', quick: '', android: '' };
 function showDownloads(editing) {
-  $('#dlWin').value = downloads.windows; $('#dlAnd').value = downloads.android;
-  $('#dlWinOpen').href = downloads.windows || '#'; $('#dlAndOpen').href = downloads.android || '#';
-  [$('#dlWin'), $('#dlAnd')].forEach(i => { i.readOnly = !editing; });
+  $('#dlExs').value = downloads.exsupport; $('#dlQk').value = downloads.quick; $('#dlAnd').value = downloads.android;
+  $('#dlExsOpen').href = downloads.exsupport || '#'; $('#dlQkOpen').href = downloads.quick || '#'; $('#dlAndOpen').href = downloads.android || '#';
+  [$('#dlExs'), $('#dlQk'), $('#dlAnd')].forEach(i => { i.readOnly = !editing; });
   $('#dlEdit').classList.toggle('hidden', editing);
   $('#dlSave').classList.toggle('hidden', !editing); $('#dlCancel').classList.toggle('hidden', !editing);
   $('#dlErr').textContent = '';
-  if (editing) $('#dlWin').focus();
+  if (editing) $('#dlExs').focus();
 }
 async function loadDownloads() {
   downloads = await api('/api/downloads'); showDownloads(false);
   const base = location.origin;
-  $('#slWin').value = base + '/get/windows'; $('#slAnd').value = base + '/get/android';
+  $('#slQk').value = base + '/get/quick'; $('#slAnd').value = base + '/get/android'; $('#slExs').value = base + '/get/exsupport';
   $('#slGuideEl').value = base + '/guide/el'; $('#slGuideEn').value = base + '/guide/en';
 }
 document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
@@ -703,7 +715,7 @@ $('#dlEdit').onclick = () => showDownloads(true);
 $('#dlCancel').onclick = () => showDownloads(false);
 $('#dlSave').onclick = async () => {
   try {
-    downloads = await api('/api/downloads', { method: 'PUT', body: { windows: $('#dlWin').value.trim(), android: $('#dlAnd').value.trim() } });
+    downloads = await api('/api/downloads', { method: 'PUT', body: { exsupport: $('#dlExs').value.trim(), quick: $('#dlQk').value.trim(), android: $('#dlAnd').value.trim() } });
     showDownloads(false); toast('Links saved');
   } catch (err) { $('#dlErr').textContent = err.message; }
 };

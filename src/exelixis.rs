@@ -1,10 +1,14 @@
-//! Exelixisnet IT Support: customer registration with the support panel.
+//! Exelixisnet IT Support: variant selection and customer registration.
 //!
-//! On first start after installation the app asks the customer for their name
-//! (see flutter/lib/desktop/widgets/exelixis_register.dart). `register` then
-//! sets a random permanent password and sends ID, name and password to the
-//! panel. The service process sends a heartbeat every minute so technicians
-//! can see who is online, and re-registers by itself if the panel lost it.
+//! One Windows binary ships as two tools, chosen by its file name (see
+//! `init_variant`): `exSupport` is the full build for technicians, and
+//! `exQuickSupport` is the locked customer build (always so on Android).
+//!
+//! QuickSupport registers itself with the support panel with no questions: it
+//! sets a hidden random permanent password, reports the computer name, local IP
+//! and signed-in user, and sends a heartbeat every minute so technicians can see
+//! who is online and connect. It re-registers by itself if the panel lost it.
+//! The full technician build never registers as a customer device.
 //!
 //! State lives in the shared service config (Config options), so it survives
 //! restarts and is visible to both the UI and the service:
@@ -41,14 +45,146 @@ pub const OPT_SECRET: &str = "exelixis-secret";
 pub const OPT_PW: &str = "exelixis-pw";
 pub const OPT_ID: &str = "exelixis-id";
 
+static SUPPORT_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// QuickSupport (customer) variant vs the full technician variant.
+///
+/// Android is always QuickSupport. On desktop one binary serves both roles and
+/// the file name decides: `exQuickSupport.exe` is the locked customer build,
+/// anything else (`exSupport.exe`) is the full build. The portable packer sets
+/// `RUSTDESK_APPNAME`, so that is honoured too.
+pub fn is_quick_support() -> bool {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        true
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let from_env = std::env::var("RUSTDESK_APPNAME")
+            .map(|v| v.to_lowercase().contains("quick"))
+            .unwrap_or(false);
+        let from_exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase()))
+            .map(|s| s.contains("quick"))
+            .unwrap_or(false);
+        from_env || from_exe
+    }
+}
+
+/// Sets the app name and, for QuickSupport, the locked-down settings. Called as
+/// early as possible (right after `load_custom_client`) in every process so the
+/// app name is consistent before any install, config path or service command.
+pub fn init_variant() {
+    let app_name = if is_quick_support() {
+        "exQuickSupport"
+    } else {
+        "exSupport"
+    };
+    *hbb_common::config::APP_NAME.write().unwrap() = app_name.to_owned();
+
+    if !is_quick_support() {
+        return;
+    }
+
+    // Incoming connections only, and no settings the customer could change.
+    {
+        let mut hard = hbb_common::config::HARD_SETTINGS.write().unwrap();
+        hard.insert("conn-type".to_owned(), "incoming".to_owned());
+        hard.insert("disable-settings".to_owned(), "Y".to_owned());
+    }
+    // WebSocket off: a customer who turns it on cannot connect to our server.
+    hbb_common::config::OVERWRITE_SETTINGS
+        .write()
+        .unwrap()
+        .insert("allow-websocket".to_owned(), "N".to_owned());
+}
+
+/// The computer's LAN address, for the technician to recognise the machine.
+fn local_ip() -> String {
+    std::net::UdpSocket::bind("0.0.0.0:0")
+        .and_then(|s| {
+            s.connect("1.1.1.1:80")?;
+            s.local_addr()
+        })
+        .map(|a| a.ip().to_string())
+        .unwrap_or_default()
+}
+
+/// The interactive Windows user (the service runs as SYSTEM, so ask the OS);
+/// the login name elsewhere.
+fn os_user() -> String {
+    #[cfg(windows)]
+    {
+        let u = crate::platform::windows::get_active_username();
+        if !u.is_empty() {
+            return u;
+        }
+    }
+    crate::username()
+}
+
+fn kind() -> &'static str {
+    if is_quick_support() {
+        "quick"
+    } else {
+        "full"
+    }
+}
+
+/// Service/host-process start-up for QuickSupport: make sure the hidden access
+/// password and the computer name are stored, then lock the password so the
+/// customer can never change it, and begin reporting to the panel.
+///
+/// Idempotent and safe to call from whichever process actually hosts the
+/// session (the installed `--server`, or the portable/Android main process).
+///
+/// Only QuickSupport reports to the panel. The full technician build (exSupport)
+/// never registers itself as a customer device.
+pub fn start_support() {
+    if !is_quick_support() {
+        return;
+    }
+    if SUPPORT_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    ensure_quick_registration();
+    start_heartbeat();
+}
+
+/// Stores the hidden permanent password and the computer name, then blocks any
+/// later change to the permanent password. The password MUST be set before the
+/// lock: `Config::set_permanent_password` refuses once the lock is in place.
+fn ensure_quick_registration() {
+    if !Config::has_permanent_password() {
+        let pw = random_password();
+        if Config::set_permanent_password(&pw) {
+            Config::set_option(OPT_PW.to_owned(), pw);
+        } else {
+            log::error!("exelixis: could not set the hidden access password");
+        }
+    }
+    if Config::get_option(OPT_NAME).is_empty() {
+        let name = hostname();
+        if !name.is_empty() {
+            Config::set_option(OPT_NAME.to_owned(), name);
+        }
+    }
+    hbb_common::config::BUILTIN_SETTINGS.write().unwrap().insert(
+        "disable-change-permanent-password".to_owned(),
+        "Y".to_owned(),
+    );
+}
+
 /// Name shown to people (window titles, texts). The internal app name has no
 /// spaces because Windows service commands use it unquoted.
 pub fn display_name() -> String {
     let name = crate::get_app_name();
-    if name == "ExelixisnetITSupport" {
-        "Exelixisnet IT Support".to_owned()
-    } else {
-        name
+    match name.as_str() {
+        "ExelixisnetITSupport" | "exSupport" | "exQuickSupport" => {
+            "Exelixisnet IT Support".to_owned()
+        }
+        _ => name,
     }
 }
 
@@ -98,6 +234,9 @@ async fn register_remote(id: &str, name: &str, phone: &str, password: &str) -> R
         "os": os_name(),
         "version": version_text(),
         "password": password,
+        "local_ip": local_ip(),
+        "os_user": os_user(),
+        "kind": kind(),
     });
     let (status, text) = post("/api/client/register", body, true).await?;
     if status != 200 {
@@ -117,14 +256,9 @@ async fn register_remote(id: &str, name: &str, phone: &str, password: &str) -> R
 /// True when this is an installed copy whose customer has not registered yet.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn needs_registration() -> bool {
-    if !crate::platform::is_installed() || ENROLL_TOKEN.is_empty() {
-        return false;
-    }
-    let options = crate::ipc::get_options();
-    options
-        .get(OPT_SECRET)
-        .map(|s| s.is_empty())
-        .unwrap_or(true)
+    // QuickSupport registers itself with the computer name, and the full
+    // technician build does not register at all, so the name dialog never shows.
+    false
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -230,6 +364,9 @@ async fn heartbeat_once() -> ResultType<()> {
             "secret": secret,
             "version": version_text(),
             "hostname": hostname(),
+            "local_ip": local_ip(),
+            "os_user": os_user(),
+            "kind": kind(),
         });
         if !last_id.is_empty() && last_id != id {
             body["old_id"] = json!(last_id);

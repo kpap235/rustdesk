@@ -56,15 +56,14 @@ T = {
         "w_h": "Εγκατάσταση στα Windows",
         "w1_t": "Κατεβάστε την εφαρμογή", "w1_d": "Ανοίξτε τον σύνδεσμο που σας στείλαμε ή σαρώστε τον κωδικό QR της πρώτης σελίδας. Ανοίξτε το αρχείο που κατέβηκε.",
         "w2_t": "Επιτρέψτε την εκκίνηση", "w2_d": "Αν τα Windows εμφανίσουν μπλε προειδοποίηση, πατήστε «Περισσότερες πληροφορίες» και μετά «Εκτέλεση οπωσδήποτε».",
-        "w3_t": "Εγκαταστήστε", "w3_d": "Πατήστε «Αποδοχή και εγκατάσταση» και μετά «Ναι» στο μήνυμα των Windows. Για γρήγορη βοήθεια χωρίς εγκατάσταση, πατήστε «Εκτέλεση χωρίς εγκατάσταση».",
-        "w4_t": "Γράψτε το όνομά σας", "w4_d": "Σε λίγα δευτερόλεπτα εμφανίζεται ένα παράθυρο. Γράψτε το όνομα ή την επωνυμία σας και πατήστε OK. Τέλος!",
-        "w5_t": "Έτοιμο", "w5_d": "Η εφαρμογή ξεκινά μόνη της με τα Windows και φαίνεται δίπλα στο ρολόι. Ο τεχνικός μας μπορεί πλέον να σας βοηθήσει όποτε χρειαστεί.",
+        "w3_t": "Πείτε μας τον κωδικό", "w3_d": "Η εφαρμογή ανοίγει και δείχνει ένα ID και έναν κωδικό μίας χρήσης. Τηλεφωνήστε μας στο 2615 00 2000 και διαβάστε μας τα. Μόλις συνδεθούμε, βλέπετε ό,τι κάνουμε.",
+        "w4_t": "Μόνιμη πρόσβαση (προαιρετικό)", "w4_d": "Για να βοηθάμε όποτε χρειαστεί χωρίς να τρέχετε κάθε φορά το αρχείο, πατήστε «Αποδοχή και εγκατάσταση». Η εφαρμογή ξεκινά μόνη της με τον υπολογιστή.",
         "a_h": "Εγκατάσταση στο Android",
         "a1_t": "Κατεβάστε και εγκαταστήστε", "a1_d": "Ανοίξτε τον σύνδεσμο ή σαρώστε τον κωδικό QR. Αν ρωτήσει, επιτρέψτε την «Εγκατάσταση άγνωστων εφαρμογών» και πατήστε «Εγκατάσταση».",
         "a2_t": "Ξεκινήστε την υπηρεσία", "a2_d": "Ανοίξτε την εφαρμογή, πατήστε κάτω την «Κοινή χρήση οθόνης» και μετά «Έναρξη υπηρεσίας».",
         "a3_t": "Επιτρέψτε την εγγραφή οθόνης", "a3_d": "Στο μήνυμα του κινητού πατήστε «Έναρξη τώρα», ώστε ο τεχνικός να βλέπει την οθόνη σας.",
         "a4_t": "Πείτε ID και κωδικό", "a4_d": "Πείτε στον τεχνικό το ID και τον κωδικό μίας χρήσης. Όταν συνδεθεί, πατήστε «Αποδοχή».",
-        "a_tip": "Για να μπορεί ο τεχνικός και να πατά στην οθόνη: ενεργοποιήστε τον «Έλεγχο εισόδου» και, στις Ρυθμίσεις προσβασιμότητας, το «Exelixisnet IT Support Input».",
+        "a_tip": "Ανοίξτε την καρτέλα «Οδηγίες» μέσα στην εφαρμογή και πατήστε κάθε γραμμή μέχρι να γίνει πράσινη — έτσι δίνετε όλες τις άδειες (οθόνη, έλεγχος, αρχεία) ώστε να συνδεθούμε αμέσως.",
         "safe_h": "Ασφάλεια",
         "safe_d": "Συνδεόμαστε μόνο όταν χρειάζεται για την υποστήριξή σας. Μπορείτε να απεγκαταστήσετε την εφαρμογή όποτε θέλετε από τις Ρυθμίσεις → Εφαρμογές.",
         # screen texts
@@ -102,15 +101,14 @@ T = {
         "w_h": "Installing on Windows",
         "w1_t": "Download the app", "w1_d": "Open the link we sent you or scan the QR code on the first page. Open the downloaded file.",
         "w2_t": "Allow it to start", "w2_d": "If Windows shows a blue warning, click “More info” and then “Run anyway”.",
-        "w3_t": "Install", "w3_d": "Click “Accept and install”, then “Yes” in the Windows prompt. For quick help without installing, click “Run without install”.",
-        "w4_t": "Enter your name", "w4_d": "After a few seconds a window appears. Type your name or company name and click OK. Done!",
-        "w5_t": "Ready", "w5_d": "The app starts with Windows and sits next to the clock. Our technician can now help you whenever needed.",
+        "w3_t": "Tell us the code", "w3_d": "The app opens and shows an ID and a one-time code. Call us on 2615 00 2000 and read them out. Once we connect, you can watch everything we do.",
+        "w4_t": "Permanent access (optional)", "w4_d": "So we can help whenever you need it without you running the file each time, click “Accept and install”. It starts on its own with the computer.",
         "a_h": "Installing on Android",
         "a1_t": "Download and install", "a1_d": "Open the link or scan the QR code. If asked, allow “Install unknown apps”, then tap “Install”.",
         "a2_t": "Start the service", "a2_d": "Open the app, tap “Share screen” at the bottom, then “Start service”.",
         "a3_t": "Allow screen recording", "a3_d": "In the phone’s prompt tap “Start now”, so the technician can see your screen.",
         "a4_t": "Read out ID and password", "a4_d": "Tell the technician the ID and the one-time password. When they connect, tap “Accept”.",
-        "a_tip": "So the technician can also tap on your screen: turn on “Input control” and, in Accessibility settings, “Exelixisnet IT Support Input”.",
+        "a_tip": "Open the “Guide” tab inside the app and tap each row until it turns green — that grants every permission (screen, control, files) so we can connect right away.",
         "safe_h": "Security",
         "safe_d": "We connect only when needed for your support. You can uninstall the app at any time from Settings → Apps.",
         "s_dl": "Downloads", "s_open": "Open file",
@@ -207,7 +205,7 @@ def windows_screens(t):
     s = {}
     s["w1"] = f"""<div class="scr win"><div class="bar">{t['s_dl']}</div><div class="body">
       <div style="display:flex;align-items:center;gap:2mm"><img src="{ICON}" style="width:7mm;height:7mm;border-radius:1.5mm">
-      <div><b>ExelixisnetITSupport-windows-x64.exe</b><div class="lbl">25 MB</div></div></div>
+      <div><b>exQuickSupport.exe</b><div class="lbl">25 MB</div></div></div>
       <div style="margin-top:2.5mm"><span class="btn red hl">{t['s_open']}</span></div></div></div>"""
     s["w2"] = f"""<div class="scr ss"><div class="t">{html.escape(t['s_ss_t'])}</div>
       <div style="font-size:6.8pt">{html.escape(t['s_ss_d'])}</div>
@@ -215,7 +213,7 @@ def windows_screens(t):
       <div style="text-align:right"><span class="btn ms hl">{t['s_run']}</span> <span class="btn ms">{t['s_norun']}</span></div></div>"""
     s["w3"] = f"""<div class="scr win"><div class="bar"><img src="{ICON}">Exelixisnet IT Support</div><div class="body">
       <div style="font-size:10pt;font-weight:300;margin-bottom:2mm">{t['s_inst']}</div>
-      <div class="lbl">{t['s_path']}</div><div class="field">C:\\Program Files\\ExelixisnetITSupport</div>
+      <div class="lbl">{t['s_path']}</div><div class="field">C:\\Program Files\\exQuickSupport</div>
       <div style="text-align:right"><span class="btn">{t['s_cancel']}</span> <span class="btn red hl">{t['s_accept']}</span></div>
       <div style="text-align:right;margin-top:1.5mm"><span class="btn">{t['s_portable']}</span></div></div></div>"""
     s["w4"] = f"""<div class="scr win"><div class="bar"><img src="{ICON}">Exelixisnet IT Support</div><div class="body">
@@ -235,7 +233,7 @@ def android_screens(t):
     tabs = lambda on: f"""<div class="tabs"><span>{t['s_connect']}</span><span>{t['s_chat']}</span>
       <span class="{'on' if on else ''}">{t['s_share']}</span><span>{t['s_settings']}</span></div>"""
     s = {}
-    s["a1"] = f"""<div class="scr phone"><div class="top">ExelixisnetITSupport.apk</div>
+    s["a1"] = f"""<div class="scr phone"><div class="top">exQuickSupport.apk</div>
       <div style="padding:2mm;text-align:center"><img src="{ICON}" style="width:9mm;height:9mm;border-radius:2mm">
       <div style="margin:1mm 0 1.5mm;font-weight:700">Exelixisnet IT Support</div>
       <div class="row" style="font-size:6.5pt"><span>{t['s_allow_unknown']}</span><span class="sw on hl"></span></div>
@@ -271,7 +269,7 @@ def build(lang):
       <p class="lead">{t['subtitle']}</p><p class="muted">{t['intro']}</p>
       <p style="margin:5mm 0 0;font-weight:700">{t['scan']}</p>
       <div class="qrs">
-        <div class="qr"><div class="os">{t['win']}</div><div class="for">{t['win_for']}</div>{qr_svg(PANEL + '/get/windows')}<div class="url">{PANEL.replace('https://','')}/get/windows</div></div>
+        <div class="qr"><div class="os">{t['win']}</div><div class="for">{t['win_for']}</div>{qr_svg(PANEL + '/get/quick')}<div class="url">{PANEL.replace('https://','')}/get/quick</div></div>
         <div class="qr"><div class="os">{t['and']}</div><div class="for">{t['and_for']}</div>{qr_svg(PANEL + '/get/android')}<div class="url">{PANEL.replace('https://','')}/get/android</div></div>
       </div>
       <div class="ways"><div class="way"><h3>{t['quick_t']}</h3><p style="margin:0">{t['quick_d']}</p></div>
@@ -280,8 +278,8 @@ def build(lang):
         <div style="text-align:right"><div class="small">E-mail</div><div style="font-size:12pt;font-weight:700">info@exelixisnet.gr</div><div class="small">exelixisnet.gr · Viber 6936566500</div></div></div>
       {foot(1)}</section>"""
     win = f"""<section class="page"><div class="band"></div><h2 style="margin-top:6mm">{t['w_h']}</h2><div class="steps">
-      {step(1, t['w1_t'], t['w1_d'], ws['w1'])}{step(2, t['w2_t'], t['w2_d'], ws['w2'])}{step(3, t['w3_t'], t['w3_d'], ws['w3'])}
-      {step(4, t['w4_t'], t['w4_d'], ws['w4'])}{step(5, t['w5_t'], t['w5_d'], ws['w5'])}</div>{foot(2)}</section>"""
+      {step(1, t['w1_t'], t['w1_d'], ws['w1'])}{step(2, t['w2_t'], t['w2_d'], ws['w2'])}
+      {step(3, t['w3_t'], t['w3_d'], ws['w5'])}{step(4, t['w4_t'], t['w4_d'], ws['w3'])}</div>{foot(2)}</section>"""
     andr = f"""<section class="page"><div class="band"></div><h2 style="margin-top:6mm">{t['a_h']}</h2><div class="steps compact">
       {step(1, t['a1_t'], t['a1_d'], an['a1'])}{step(2, t['a2_t'], t['a2_d'], an['a2'])}{step(3, t['a3_t'], t['a3_d'], an['a3'])}
       {step(4, t['a4_t'], t['a4_d'], an['a4'])}</div><div class="tip">{t['a_tip']}</div>

@@ -34,7 +34,11 @@ FERNET = Fernet(os.environ["PANEL_FERNET_KEY"].encode())
 ENROLL_TOKEN = os.environ["PANEL_ENROLL_TOKEN"]
 HUB_API_KEY = os.environ.get("PANEL_HUB_API_KEY", "")
 MONITOR_API_KEY = os.environ.get("PANEL_MONITOR_API_KEY", "")
-APP_URI = os.environ.get("PANEL_APP_URI", "exelixisnetitsupport")
+APP_URI = os.environ.get("PANEL_APP_URI", "exsupport")
+# 1.1 renamed the technician app to exSupport, so its URI scheme is exsupport://.
+# Map the old value through, so a VPS whose .env still names the old app keeps working.
+if APP_URI == "exelixisnetitsupport":
+    APP_URI = "exsupport"
 ONLINE_SECONDS = int(os.environ.get("PANEL_ONLINE_SECONDS", "180"))
 SESSION_HOURS = int(os.environ.get("PANEL_SESSION_HOURS", "12"))
 COOKIE_SECURE = os.environ.get("PANEL_COOKIE_SECURE", "1") == "1"
@@ -124,6 +128,12 @@ def init_db() -> None:
             );
             """
         )
+        # Columns added after 1.0: local network address, the signed-in Windows
+        # user, and which build (full / quick) each device runs.
+        have = {row["name"] for row in c.execute("PRAGMA table_info(devices)")}
+        for col in ("local_ip", "os_user", "kind"):
+            if col not in have:
+                c.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
         if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             user = os.environ.get("PANEL_ADMIN_USER", "admin")
             pw = os.environ.get("PANEL_ADMIN_PASSWORD")
@@ -258,6 +268,9 @@ def device_view(r: sqlite3.Row) -> dict:
         "created": r["created"],
         "has_password": bool(r["pw_enc"]),
         "last_ip": r["last_ip"],
+        "local_ip": r["local_ip"],
+        "os_user": r["os_user"],
+        "kind": r["kind"],
     }
 
 
@@ -285,6 +298,9 @@ class RegisterIn(BaseModel):
     os: str = Field(default="", max_length=120)
     version: str = Field(default="", max_length=40)
     password: str = Field(default="", max_length=128)
+    local_ip: str = Field(default="", max_length=64)
+    os_user: str = Field(default="", max_length=120)
+    kind: str = Field(default="", max_length=16)
 
 
 class HeartbeatIn(BaseModel):
@@ -293,6 +309,9 @@ class HeartbeatIn(BaseModel):
     version: str = Field(default="", max_length=40)
     hostname: str = Field(default="", max_length=120)
     password: str = Field(default="", max_length=128)
+    local_ip: str = Field(default="", max_length=64)
+    os_user: str = Field(default="", max_length=120)
+    kind: str = Field(default="", max_length=16)
     # When the ID changes (rare), the app sends its previous ID here.
     old_id: str = Field(default="", max_length=40)
 
@@ -308,14 +327,16 @@ def client_register(body: RegisterIn, request: Request, x_enroll_token: str = He
         existed = c.execute("SELECT 1 FROM devices WHERE rd_id=?", (body.id,)).fetchone()
         c.execute(
             """INSERT INTO devices (rd_id, name, phone, hostname, os, app_version, pw_enc,
-                                    secret_hash, last_ip, created, last_seen)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                                    secret_hash, last_ip, local_ip, os_user, kind, created, last_seen)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(rd_id) DO UPDATE SET name=excluded.name, phone=excluded.phone,
                  hostname=excluded.hostname, os=excluded.os, app_version=excluded.app_version,
                  pw_enc=excluded.pw_enc, secret_hash=excluded.secret_hash,
-                 last_ip=excluded.last_ip, last_seen=excluded.last_seen""",
+                 last_ip=excluded.last_ip, local_ip=excluded.local_ip, os_user=excluded.os_user,
+                 kind=excluded.kind, last_seen=excluded.last_seen""",
             (body.id, body.name.strip(), body.phone.strip(), body.hostname, body.os,
-             body.version, enc(body.password), sha256(secret), ip, now, now),
+             body.version, enc(body.password), sha256(secret), ip, body.local_ip,
+             body.os_user, body.kind, now, now),
         )
     audit("client", "re-register" if existed else "register", body.id, f"{body.name} from {ip}")
     return {"secret": secret}
@@ -333,6 +354,12 @@ def client_heartbeat(body: HeartbeatIn, request: Request):
             fields["app_version"] = body.version
         if body.hostname:
             fields["hostname"] = body.hostname
+        if body.local_ip:
+            fields["local_ip"] = body.local_ip
+        if body.os_user:
+            fields["os_user"] = body.os_user
+        if body.kind:
+            fields["kind"] = body.kind
         if body.password:
             fields["pw_enc"] = enc(body.password)
         if body.old_id and body.old_id != body.id:
@@ -563,9 +590,12 @@ def me_2fa_confirm(body: CodeIn, u=Depends(current_user)):
 
 
 # --- download links for customers -------------------------------------------
+# Stable "latest release" links, so a new build is picked up without editing these.
+_REL = "https://github.com/kpap235/rustdesk/releases/latest/download"
 DOWNLOAD_DEFAULTS = {
-    "download_windows": "https://github.com/kpap235/rustdesk/releases/download/v1.0.1/ExelixisnetITSupport-1.0.1-windows-x64.exe",
-    "download_android": "https://github.com/kpap235/rustdesk/releases/download/v1.0.1/ExelixisnetITSupport-1.0.1-android-arm64.apk",
+    "download_exsupport": f"{_REL}/exSupport.exe",
+    "download_quick": f"{_REL}/exQuickSupport.exe",
+    "download_android": f"{_REL}/exQuickSupport.apk",
 }
 
 
@@ -576,7 +606,8 @@ def get_downloads() -> dict:
 
 
 class DownloadsIn(BaseModel):
-    windows: str = Field(max_length=500)
+    exsupport: str = Field(max_length=500)
+    quick: str = Field(max_length=500)
     android: str = Field(max_length=500)
 
 
@@ -587,7 +618,11 @@ def downloads(u=Depends(current_user)):
 
 @app.put("/api/downloads")
 def downloads_save(body: DownloadsIn, u=Depends(admin_user)):
-    values = {"download_windows": body.windows.strip(), "download_android": body.android.strip()}
+    values = {
+        "download_exsupport": body.exsupport.strip(),
+        "download_quick": body.quick.strip(),
+        "download_android": body.android.strip(),
+    }
     for v in values.values():
         if v and not v.startswith("https://"):
             raise HTTPException(400, "Links must start with https://")

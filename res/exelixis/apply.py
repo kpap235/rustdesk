@@ -15,10 +15,12 @@ import sys
 # --- Exelixisnet settings -------------------------------------------------
 SERVER = "rustdesk.exelixisnet.gr"
 PUB_KEY = "OMTaNaukuebffcMIkLStsdfGx6bP0vgtJ68bRpX7Ec0="
-# Internal name: used for the installed exe, Windows service, config folder
-# and shortcuts. Must not contain spaces (Windows service commands are not
-# quoted), so the spaced display name lives in Cargo.toml / the UI instead.
-APP_NAME = "ExelixisnetITSupport"
+# Compiled-in default internal name. At runtime exelixis::init_variant() sets
+# this to "exSupport" (full technician build) or "exQuickSupport" (customer
+# build) from the exe name, so this default is only a fallback. Must not
+# contain spaces (Windows service commands are not quoted); the spaced display
+# name lives in Cargo.toml / the UI instead.
+APP_NAME = "exSupport"
 # ---------------------------------------------------------------------------
 
 def _find_root() -> str:

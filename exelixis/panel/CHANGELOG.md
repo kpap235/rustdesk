@@ -3,6 +3,13 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 1.4.0 — 2026-11-07
+- Each computer now shows a **Quick / Full** badge, its **local network address** and the
+  **signed-in Windows user**, so you can tell machines apart at a glance. Search matches these too.
+- **Downloads** page now has three links: exSupport (technicians), exQuickSupport for Windows and
+  exQuickSupport for Android. Short links: `/get/exsupport`, `/get/quick`, `/get/android`.
+- Connect links use the `exsupport://` scheme to match the renamed technician app.
+
 ## 1.3.0 — 2026-11-07
 - Short links for customers that never change: `/get/windows`, `/get/android` (they lead to the
   links set on the Downloads page) and the setup guide `/guide/el`, `/guide/en`.

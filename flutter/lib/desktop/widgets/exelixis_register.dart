@@ -166,6 +166,108 @@ class _ExelixisRegisterDialogState extends State<_ExelixisRegisterDialog> {
   }
 }
 
+/// A "? Instructions / Οδηγίες" link for the QuickSupport home page.
+Widget exelixisInstructionsButton(BuildContext context) {
+  return TextButton.icon(
+    icon: const Icon(Icons.help_outline, size: 18, color: _kBlue),
+    label: const Text('Οδηγίες · Instructions',
+        style: TextStyle(fontSize: 12, color: _kBlue)),
+    onPressed: () => showDialog(
+      context: context,
+      builder: (_) => const _ExelixisInstructionsDialog(),
+    ),
+  );
+}
+
+class _ExelixisInstructionsDialog extends StatelessWidget {
+  const _ExelixisInstructionsDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = TextStyle(color: Theme.of(context).hintColor, fontSize: 13);
+    return AlertDialog(
+      title: Row(children: [
+        Image.asset('assets/icon.png', width: 28, height: 28),
+        const SizedBox(width: 10),
+        const Expanded(child: Text('Πώς λειτουργεί · How it works')),
+      ]),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _section(
+                'Ελληνικά',
+                const [
+                  'Για να σας βοηθήσουμε, τηλεφωνήστε μας στο $kExelixisPhone και '
+                      'διαβάστε μας τον κωδικό μίας χρήσης που εμφανίζεται σε αυτό '
+                      'το παράθυρο. Αν αλλάξει, πατήστε το κουμπί ανανέωσης δίπλα του.',
+                  'Όταν συνδεόμαστε, βλέπουμε την οθόνη σας και μπορούμε να '
+                      'χειριστούμε τον υπολογιστή για να λύσουμε το πρόβλημα. '
+                      'Βλέπετε ό,τι κάνουμε σε όλη τη διάρκεια.',
+                  'Το κουμπί «Εγκατάσταση» αφήνει το πρόγραμμα μόνιμα, ώστε να '
+                      'μπορούμε να συνδεθούμε και χωρίς να τρέχετε κάθε φορά το αρχείο. '
+                      'Ξεκινά αυτόματα με τον υπολογιστή.',
+                  'Ιδιωτικότητα: συνδεόμαστε μόνο όταν μας το ζητήσετε. Μπορείτε να '
+                      'κλείσετε το πρόγραμμα ή να το απεγκαταστήσετε όποτε θέλετε για '
+                      'να σταματήσει κάθε πρόσβαση.',
+                ],
+                hint,
+              ),
+              const SizedBox(height: 16),
+              _section(
+                'English',
+                const [
+                  'To get help, call us on $kExelixisPhone and read out the '
+                      'one-time code shown in this window. If it changes, press the '
+                      'refresh button next to it.',
+                  'When we connect we can see your screen and control the computer '
+                      'to fix the problem. You can watch everything we do.',
+                  'The "Install" button keeps the program on the computer so we can '
+                      'connect without you running the file each time. It starts '
+                      'automatically with the computer.',
+                  'Privacy: we connect only when you ask us to. You can close the '
+                      'program or uninstall it at any time to stop all access.',
+                ],
+                hint,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: _kBlue),
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK', style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    );
+  }
+
+  Widget _section(String title, List<String> points, TextStyle hint) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            style: const TextStyle(
+                fontWeight: FontWeight.w700, color: _kRed, fontSize: 14)),
+        const SizedBox(height: 6),
+        for (final p in points)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('•  ', style: TextStyle(color: _kBlue)),
+              Expanded(child: Text(p, style: hint)),
+            ]),
+          ),
+      ],
+    );
+  }
+}
+
 /// Support contact shown under the logo on the home page.
 Widget exelixisSupportContact(BuildContext context) {
   final style = TextStyle(fontSize: 12, color: Theme.of(context).hintColor);

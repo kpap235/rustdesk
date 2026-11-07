@@ -94,6 +94,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         alignment: Alignment.center,
         child: exelixisSupportContact(context),
       ),
+      if (isIncomingOnly)
+        Align(
+          alignment: Alignment.center,
+          child: exelixisInstructionsButton(context),
+        ),
       buildTip(context),
       if (!isOutgoingOnly) buildIDBoard(context),
       if (!isOutgoingOnly) buildPasswordBoard(context),

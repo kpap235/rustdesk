@@ -53,6 +53,16 @@ fn initialize(app_dir: &str, custom_client_config: &str) {
     } else {
         crate::read_custom_client(custom_client_config);
     }
+    crate::exelixis::init_variant();
+    // On Android, and on a portable (not installed) desktop QuickSupport, this
+    // flutter process is the one that hosts the session, so it must register and
+    // report. The installed desktop service does that from server.rs instead.
+    #[cfg(target_os = "android")]
+    crate::exelixis::start_support();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if crate::exelixis::is_quick_support() && !crate::platform::is_installed() {
+        crate::exelixis::start_support();
+    }
     #[cfg(target_os = "android")]
     {
         // flexi_logger can't work when android_logger initialized.

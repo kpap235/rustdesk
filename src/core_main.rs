@@ -47,6 +47,7 @@ pub fn core_main() -> Option<CoreMainAction> {
         return None;
     }
     crate::load_custom_client();
+    crate::exelixis::init_variant();
     #[cfg(windows)]
     if !crate::platform::windows::bootstrap() {
         // return None to terminate the process

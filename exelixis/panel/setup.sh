@@ -17,7 +17,7 @@ PANEL_HUB_API_KEY=$HUBKEY
 PANEL_MONITOR_API_KEY=$MONKEY
 PANEL_ADMIN_USER=admin
 PANEL_ADMIN_PASSWORD=$ADMINPW
-PANEL_APP_URI=exelixisnetitsupport
+PANEL_APP_URI=exsupport
 EOT
 chmod 600 .env
 mkdir -p data && chmod 777 data

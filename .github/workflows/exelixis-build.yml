@@ -60,24 +60,29 @@ jobs:
         run: |
           mkdir dist
           gh release download exelixis-staging -R "$GITHUB_REPOSITORY" -D staging
+          # One Windows binary becomes two downloads: the file name decides the
+          # variant at runtime (the packer passes its own name as RUSTDESK_APPNAME).
+          #   exSupport.exe       - full program for admins / technicians
+          #   exQuickSupport.exe  - locked customer build
+          # Android is always the customer build. Names are stable (no version),
+          # so releases/latest/download/<name> always points at the newest build.
           for f in staging/*; do
             n=$(basename "$f")
             case "$n" in
-              *-x86_64.exe)    t="ExelixisnetITSupport-$V-windows-x64.exe" ;;
-              *-aarch64.exe)   t="ExelixisnetITSupport-$V-windows-arm64.exe" ;;
-              *-aarch64.apk)   t="ExelixisnetITSupport-$V-android-arm64.apk" ;;
-              *-armv7.apk)     t="ExelixisnetITSupport-$V-android-armv7.apk" ;;
-              *-x86_64.apk)    t="ExelixisnetITSupport-$V-android-x86_64.apk" ;;
-              *-universal.apk) t="ExelixisnetITSupport-$V-android-universal.apk" ;;
-              *) continue ;;   # .msi not published until it carries the new name
+              *-x86_64.exe)    cp "$f" "dist/exSupport.exe"; cp "$f" "dist/exQuickSupport.exe" ;;
+              *-aarch64.exe)   cp "$f" "dist/exSupport-arm64.exe"; cp "$f" "dist/exQuickSupport-arm64.exe" ;;
+              *-aarch64.apk)   cp "$f" "dist/exQuickSupport-arm64.apk" ;;
+              *-armv7.apk)     cp "$f" "dist/exQuickSupport-armv7.apk" ;;
+              *-x86_64.apk)    cp "$f" "dist/exQuickSupport-x86_64.apk" ;;
+              *-universal.apk) cp "$f" "dist/exQuickSupport.apk" ;;
+              *) continue ;;
             esac
-            cp "$f" "dist/$t"
           done
           ls -l dist
           [ -n "$(ls dist)" ] || { echo "::error::No build files were produced"; exit 1; }
           # Release notes: this version's section of the change log
           awk -v v="$V" '$0 ~ "^## "v" " {on=1; next} /^## / {on=0} on' exelixis/CHANGELOG.md > notes.md
           RD=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          printf '\n---\nBuilt on RustDesk %s. Use the **windows-x64.exe** for PCs and the **android-arm64.apk** (or universal) for phones.\n' "$RD" >> notes.md
+          printf '\n---\nBuilt on RustDesk %s.\n\n- **exSupport.exe** - full program for technicians.\n- **exQuickSupport.exe** - send this to a customer; it runs without installing.\n- **exQuickSupport.apk** - the customer app for Android phones.\n' "$RD" >> notes.md
           gh release create "v$V" dist/* -R "$GITHUB_REPOSITORY" --title "Exelixisnet IT Support $V" --notes-file notes.md --target "$GITHUB_SHA"
           gh release delete exelixis-staging -R "$GITHUB_REPOSITORY" --cleanup-tag -y || true
