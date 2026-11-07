@@ -344,6 +344,83 @@ pub fn start_heartbeat() {
         .ok();
 }
 
+// ---------------------------------------------------------------------------
+// Session reporting: measure how long a technician is connected
+// ---------------------------------------------------------------------------
+
+// One key per active support period on this device (first remote connection in
+// to last one out). Kept here so the "end" report pairs with its "start".
+static CURRENT_SESSION_KEY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// A remote-control connection was authorized. Call when the count of live
+/// remote connections rises to one (the start of a support session).
+pub fn on_remote_session_start() {
+    if ENROLL_TOKEN.is_empty() {
+        return;
+    }
+    let key = {
+        let mut k = match CURRENT_SESSION_KEY.lock() {
+            Ok(k) => k,
+            Err(_) => return,
+        };
+        if k.is_empty() {
+            *k = format!("{}-{}", std::process::id(), random_password());
+        }
+        k.clone()
+    };
+    report_session("start", key);
+}
+
+/// The last remote-control connection closed (the end of a support session).
+pub fn on_remote_session_end() {
+    if ENROLL_TOKEN.is_empty() {
+        return;
+    }
+    let key = {
+        let mut k = match CURRENT_SESSION_KEY.lock() {
+            Ok(k) => k,
+            Err(_) => return,
+        };
+        let key = k.clone();
+        k.clear();
+        key
+    };
+    if !key.is_empty() {
+        report_session("end", key);
+    }
+}
+
+fn report_session(event: &'static str, session_key: String) {
+    std::thread::Builder::new()
+        .name("exelixis-session".into())
+        .spawn(move || {
+            if let Err(e) = report_session_blocking(event, &session_key) {
+                log::debug!("exelixis: session report failed: {e}");
+            }
+        })
+        .ok();
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn report_session_blocking(event: &str, session_key: &str) -> ResultType<()> {
+    let id = Config::get_id();
+    let secret = Config::get_option(OPT_SECRET);
+    if id.is_empty() || secret.is_empty() {
+        return Ok(()); // not an enrolled support device
+    }
+    let body = json!({
+        "id": id,
+        "secret": secret,
+        "event": event,
+        "session_key": session_key,
+    });
+    let (status, text) = post("/api/client/session", body, false).await?;
+    if status != 200 {
+        hbb_common::bail!("session {} answered {}: {}", event, status, text);
+    }
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn heartbeat_once() -> ResultType<()> {
     let name = Config::get_option(OPT_NAME);

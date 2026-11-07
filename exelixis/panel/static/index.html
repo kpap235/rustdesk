@@ -147,6 +147,19 @@
   .checkrow small { color: var(--muted); }
   .steps-mini { margin: 0 0 18px; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.6; }
   .steps-mini b { color: var(--ink); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 16px 18px; }
+  .tile .n { font-size: 30px; font-weight: 800; line-height: 1.1; color: var(--ink); }
+  .tile .n.accent { color: var(--navy); }
+  .tile .l { font-size: 12px; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .04em; }
+  .dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  .dash-grid .panel:first-child { grid-column: 1 / -1; }
+  .chart { display: flex; align-items: flex-end; gap: 14px; height: 200px; padding-top: 10px; }
+  .chart .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+  .chart .bar { width: 100%; max-width: 54px; background: linear-gradient(180deg, var(--navy-2), var(--navy)); border-radius: 6px 6px 0 0; min-height: 2px; position: relative; }
+  .chart .bar .v { position: absolute; top: -18px; left: 0; right: 0; text-align: center; font-size: 11px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .chart .bar-col .m { font-size: 11px; color: var(--muted); }
+  @media (max-width: 760px) { .dash-grid { grid-template-columns: 1fr; } }
 
   /* ---------- Customers ---------- */
   .finder { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
@@ -318,7 +331,9 @@
       <div><strong class="slant">Exelixisnet</strong><small>IT Support</small></div>
     </div>
     <nav aria-label="Sections">
-      <button data-tab="devices" class="on">Customers <span class="badge" id="navOnline">0</span></button>
+      <button data-tab="dashboard" class="on">Dashboard</button>
+      <button data-tab="devices">Computers <span class="badge" id="navOnline">0</span></button>
+      <button data-tab="customers">Customers</button>
       <button data-tab="users" class="admin-only">Technicians</button>
       <button data-tab="audit" class="admin-only">Activity</button>
       <button data-tab="downloads">Downloads</button>
@@ -334,8 +349,54 @@
   </aside>
 
   <main>
-    <!-- Customers -->
-    <div id="tab-devices">
+    <!-- Dashboard -->
+    <div id="tab-dashboard">
+      <div class="page-head">
+        <div><h1 class="slant">Dashboard</h1><p id="dashSub">This month's support activity.</p></div>
+      </div>
+      <div class="tiles" id="dashTiles"></div>
+      <div class="dash-grid">
+        <div class="panel">
+          <h2>Hours per month</h2>
+          <div id="dashChart" class="chart"></div>
+        </div>
+        <div class="panel">
+          <h2>By customer <span class="muted" id="dashMonthC"></span></h2>
+          <div class="table-wrap"><table id="dashCustomers"><tbody></tbody></table></div>
+        </div>
+        <div class="panel">
+          <h2>By computer <span class="muted" id="dashMonthP"></span></h2>
+          <div class="table-wrap"><table id="dashComputers"><tbody></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Customers (clients) -->
+    <div id="tab-customers" class="hidden">
+      <div class="page-head">
+        <div><h1 class="slant">Customers</h1><p>Clients you support. Assign computers to a customer to track time and charges.</p></div>
+        <button class="btn btn-primary admin-only" id="addCust">+ Add customer</button>
+      </div>
+      <div class="panel admin-only" id="billingPanel" style="margin-bottom:18px">
+        <h2>Billing</h2>
+        <p class="lead">Default rate used for any customer without their own rate.</p>
+        <div class="dl-row">
+          <label class="field" style="margin:0"><span>Default rate (per hour)</span><input id="billRate" type="number" min="0" step="1" style="max-width:160px"></label>
+          <label class="field" style="margin:0"><span>Currency</span><input id="billCur" maxlength="8" style="max-width:90px"></label>
+          <button class="btn btn-primary" id="billSave">Save</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="custTable">
+          <thead><tr><th>Customer</th><th>Contact</th><th>Computers</th><th class="admin-only">Rate/h</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted" id="custEmpty" style="margin-top:14px">No customers yet.</p>
+    </div>
+
+    <!-- Computers -->
+    <div id="tab-devices" class="hidden">
       <div class="page-head">
         <div>
           <h1 class="slant">Customers</h1>
@@ -490,6 +551,7 @@
     <label class="field"><span>Name or company</span><input id="dlgName" maxlength="120" required></label>
     <label class="field"><span>Phone</span><input id="dlgPhone" maxlength="40"></label>
     <label class="field"><span>Notes for technicians</span><textarea id="dlgNotes" rows="3" maxlength="2000"></textarea></label>
+    <label class="field"><span>Customer</span><select id="dlgCustomer"><option value="0">— Unassigned —</option></select></label>
     <label class="field"><span>Access password</span>
       <div class="pwrow"><input id="dlgPw" readonly placeholder="Hidden"><button type="button" class="btn btn-quiet" id="dlgReveal">Show</button></div>
     </label>
@@ -523,6 +585,22 @@
     <div class="dlg-actions">
       <button type="button" class="btn btn-quiet" id="pcCancel">Cancel</button>
       <button class="btn btn-primary">Add computer</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="custDlg" aria-labelledby="custDlgTitle">
+  <form method="dialog" id="custForm">
+    <h2 class="slant" id="custDlgTitle">Add customer</h2>
+    <label class="field"><span>Name or company *</span><input id="cuName" maxlength="160" required></label>
+    <label class="field"><span>Contact (phone / e-mail)</span><input id="cuContact" maxlength="200"></label>
+    <label class="field"><span>Rate per hour <small class="muted">(leave empty to use the default)</small></span><input id="cuRate" type="number" min="0" step="1"></label>
+    <label class="field"><span>Notes</span><textarea id="cuNotes" rows="2" maxlength="2000"></textarea></label>
+    <div class="err" id="cuErr" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn btn-danger spacer hidden" id="cuDelete">Delete</button>
+      <button type="button" class="btn btn-quiet" id="cuCancel">Cancel</button>
+      <button class="btn btn-primary">Save</button>
     </div>
   </form>
 </dialog>
@@ -607,14 +685,17 @@ async function start() {
   $('#panelVer').textContent = me.panel_version ? `Panel version ${me.panel_version}` : '';
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', me.role !== 'admin'));
   $('#tfaOn').classList.toggle('hidden', !me.totp); $('#tfaOff').classList.toggle('hidden', me.totp);
+  loadDashboard();
+  loadCustomers();
   loadDevices(); setInterval(loadDevices, 30000);
-  $('#search').focus();
 }
 
 // ---------- sections ----------
 document.querySelectorAll('.rail nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.rail nav button').forEach(x => x.classList.toggle('on', x === b));
-  ['devices', 'account', 'users', 'audit', 'news', 'downloads'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  ['dashboard', 'devices', 'customers', 'account', 'users', 'audit', 'news', 'downloads'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  if (b.dataset.tab === 'dashboard') loadDashboard();
+  if (b.dataset.tab === 'customers') loadCustomers();
   if (b.dataset.tab === 'news') loadNews();
   if (b.dataset.tab === 'downloads') loadDownloads();
   if (b.dataset.tab === 'users') loadUsers();
@@ -645,7 +726,7 @@ function renderDevices() {
     <li class="pc ${d.online ? 'live' : ''}">
       <span class="signal" aria-hidden="true"></span>
       <div class="who"><strong>${esc(d.name)}</strong>${d.kind === 'quick' ? '<span class="pill kind-q">Quick</span>' : d.kind === 'full' ? '<span class="pill kind-f">Full</span>' : d.kind === 'manual' ? '<span class="pill kind-m">Manual</span>' : ''}${d.hidden ? '<span class="pill kind-h">Hidden</span>' : ''}<span>${esc(d.phone || '')}</span></div>
-      <div class="machine"><div>${esc(d.hostname || '—')}${d.local_ip ? ' · ' + esc(d.local_ip) : ''}</div><span class="rid">ID ${esc(fmtId(d.id))}</span></div>
+      <div class="machine"><div>${esc(d.hostname || '—')}${d.local_ip ? ' · ' + esc(d.local_ip) : ''}${d.customer_name ? ' · <span style="color:var(--navy);font-weight:600">' + esc(d.customer_name) + '</span>' : ''}</div><span class="rid">ID ${esc(fmtId(d.id))}</span></div>
       <div class="state">${d.online ? '<span class="pill live">Online</span>' : `<span class="pill idle">Seen ${ago(d.last_seen)}</span>`}</div>
       <div class="act">
         <button class="btn btn-primary" data-connect="${esc(d.id)}" ${d.has_password ? '' : 'title="No password stored: you will be asked for one"'}>Connect</button>
@@ -679,6 +760,9 @@ function openDevice(id) {
   $('#dlgId').textContent = `ID ${fmtId(d.id)} · ${d.hostname || 'unknown computer'}${d.local_ip ? ' (' + d.local_ip + ')' : ''}${d.os_user ? ' · user ' + d.os_user : ''} · ${d.os || ''} · app ${d.app_version || '?'}`;
   $('#dlgName').value = d.name; $('#dlgPhone').value = d.phone; $('#dlgNotes').value = d.notes; $('#dlgPw').value = '';
   $('#dlgHidden').checked = !!d.hidden;
+  $('#dlgCustomer').innerHTML = '<option value="0">— Unassigned —</option>' +
+    customersCache.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  $('#dlgCustomer').value = d.customer_id || 0;
   $('#devDlg').showModal();
 }
 $('#dlgReveal').onclick = async () => {
@@ -690,6 +774,7 @@ $('#devForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
     const body = { name: $('#dlgName').value, phone: $('#dlgPhone').value, notes: $('#dlgNotes').value };
+    body.customer_id = +$('#dlgCustomer').value;
     if (me.role === 'admin') body.hidden = $('#dlgHidden').checked;
     await api(`/api/devices/${encodeURIComponent(editId)}`, { method: 'PATCH', body });
     $('#devDlg').close(); loadDevices(); toast('Changes saved');
@@ -781,6 +866,89 @@ $('#userForm').addEventListener('submit', async (e) => {
     $('#userDlg').close(); loadUsers();
   } catch (err) { $('#userErr').textContent = err.message; }
 });
+
+// ---------- dashboard ----------
+function fmtNum(n) { n = +n || 0; return (Math.round(n * 10) / 10).toString(); }
+const MONS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function monShort(m) { return MONS[+m.split('-')[1]] || m; }
+function monLong(m) { const [y, mo] = m.split('-'); return monShort(m) + ' ' + y; }
+let dashData = null;
+async function loadDashboard() {
+  try { dashData = await api('/api/dashboard'); } catch (e) { return; }
+  const cur = dashData.currency || '€', t = dashData.tiles, admin = 'charge_month' in t;
+  const tiles = [['online_now', 'Online now'], ['active_sessions', 'In session'], ['hours_month', 'Hours this month']];
+  if (admin) tiles.push(['charge_month', 'Charged this month']);
+  tiles.push(['total_computers', 'Computers'], ['total_customers', 'Customers']);
+  $('#dashTiles').innerHTML = tiles.map(([k, l]) => {
+    let v = t[k];
+    if (k === 'charge_month') v = cur + fmtNum(v);
+    else if (k === 'hours_month') v = fmtNum(v) + 'h';
+    return `<div class="tile"><div class="n ${k === 'charge_month' ? 'accent' : ''}">${v}</div><div class="l">${l}</div></div>`;
+  }).join('');
+  const ms = dashData.months, max = Math.max(1, ...ms.map(x => x.hours));
+  $('#dashChart').innerHTML = ms.map(x => {
+    const h = Math.round(x.hours / max * 160);
+    return `<div class="bar-col"><div class="bar" style="height:${h}px"><span class="v">${x.hours > 0 ? fmtNum(x.hours) + 'h' : ''}</span></div><span class="m">${monShort(x.month)}</span></div>`;
+  }).join('');
+  $('#dashMonthC').textContent = '· ' + monLong(dashData.month);
+  $('#dashMonthP').textContent = '· ' + monLong(dashData.month);
+  $('#dashCustomers').querySelector('tbody').innerHTML = dashData.customers.length
+    ? dashData.customers.map(r => `<tr><td><strong>${esc(r.name)}</strong></td><td>${fmtNum(r.hours)}h</td>${admin ? `<td>${cur}${fmtNum(r.charge)}</td>` : ''}</tr>`).join('')
+    : `<tr><td class="muted">No time logged this month yet.</td></tr>`;
+  $('#dashComputers').querySelector('tbody').innerHTML = dashData.computers.length
+    ? dashData.computers.map(r => `<tr><td><strong>${esc(r.name)}</strong></td><td>${fmtNum(r.hours)}h</td><td class="muted">${r.sessions} session${r.sessions !== 1 ? 's' : ''}</td></tr>`).join('')
+    : `<tr><td class="muted">No time logged this month yet.</td></tr>`;
+}
+
+// ---------- customers (clients) ----------
+let customersCache = [], editCust = null;
+async function loadCustomers() {
+  let data; try { data = await api('/api/customers'); } catch (e) { return; }
+  customersCache = data.customers;
+  const admin = me.role === 'admin', cur = data.currency || '€';
+  if (admin && data.default_rate != null) { $('#billRate').value = data.default_rate; $('#billCur').value = data.currency; }
+  $('#custTable').querySelector('tbody').innerHTML = data.customers.map(c => `<tr>
+      <td><strong>${esc(c.name)}</strong></td>
+      <td class="muted">${esc(c.contact || '')}</td>
+      <td>${c.computers}</td>
+      ${admin ? `<td>${c.rate != null ? cur + fmtNum(c.rate) : '<span class="muted">default</span>'}</td>` : ''}
+      <td style="text-align:right">${admin ? `<button class="btn btn-quiet" data-editcust="${c.id}">Edit</button>` : ''}</td>
+    </tr>`).join('');
+  $('#custEmpty').classList.toggle('hidden', data.customers.length > 0);
+}
+$('#addCust').onclick = () => openCust(null);
+function openCust(c) {
+  editCust = c;
+  $('#custDlgTitle').textContent = c ? c.name : 'Add customer';
+  $('#cuName').value = c ? c.name : ''; $('#cuContact').value = c ? (c.contact || '') : '';
+  $('#cuRate').value = c && c.rate != null ? c.rate : ''; $('#cuNotes').value = c ? (c.notes || '') : '';
+  $('#cuErr').textContent = ''; $('#cuDelete').classList.toggle('hidden', !c);
+  $('#custDlg').showModal(); $('#cuName').focus();
+}
+$('#custTable').addEventListener('click', e => {
+  const b = e.target.closest('[data-editcust]'); if (!b) return;
+  const c = customersCache.find(x => x.id == b.dataset.editcust); if (c) openCust(c);
+});
+$('#cuCancel').onclick = () => $('#custDlg').close();
+$('#custForm').addEventListener('submit', async e => {
+  e.preventDefault(); $('#cuErr').textContent = '';
+  const body = { name: $('#cuName').value.trim(), contact: $('#cuContact').value.trim(),
+    notes: $('#cuNotes').value.trim(), rate: $('#cuRate').value === '' ? null : +$('#cuRate').value };
+  try {
+    if (editCust) await api('/api/customers/' + editCust.id, { method: 'PATCH', body });
+    else await api('/api/customers', { method: 'POST', body });
+    $('#custDlg').close(); loadCustomers(); toast('Saved');
+  } catch (err) { $('#cuErr').textContent = err.message; }
+});
+$('#cuDelete').onclick = async () => {
+  if (!editCust || !confirm('Delete this customer? Their computers stay but become unassigned.')) return;
+  try { await api('/api/customers/' + editCust.id, { method: 'DELETE' }); $('#custDlg').close(); loadCustomers(); loadDevices(); toast('Customer deleted'); }
+  catch (err) { toast(err.message); }
+};
+$('#billSave').onclick = async () => {
+  try { await api('/api/billing', { method: 'PUT', body: { default_rate: +$('#billRate').value || 0, currency: $('#billCur').value.trim() || '€' } }); toast('Billing saved'); loadCustomers(); }
+  catch (err) { toast(err.message); }
+};
 
 // ---------- downloads ----------
 let downloads = { exsupport: '', quick: '', android: '' };

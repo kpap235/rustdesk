@@ -3,6 +3,17 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 1.7.0 — 2026-11-07
+- New **Dashboard** with this month's figures: computers online, sessions in progress, hours
+  worked, amount charged (admins), and a six-month hours chart, plus **time and charges per
+  customer** and **per computer**.
+- New **Customers** page: add clients, set a per-customer hourly rate (or use a global default),
+  and see how many computers each has. Each computer can be **assigned to a customer** from its
+  details, so support time rolls up per customer.
+- **Billing** is admin-only: technicians see hours and stats but not rates or € amounts.
+- Support time is measured automatically from the app (needs app 1.2.0 or newer on the customer's
+  computer); the computer list was renamed **Computers**.
+
 ## 1.6.0 — 2026-11-07
 - **Hide computers from technicians:** in a computer's details an administrator can tick
   "Hide this computer from technicians". Hidden computers (and their passwords) are visible and

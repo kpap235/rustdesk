@@ -126,6 +126,29 @@ def init_db() -> None:
                 rd_id TEXT NOT NULL DEFAULT '',
                 detail TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS customers (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                contact TEXT NOT NULL DEFAULT '',
+                rate REAL,                          -- NULL = use the global default rate
+                notes TEXT NOT NULL DEFAULT '',
+                created REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY,
+                rd_id TEXT NOT NULL,
+                customer_id INTEGER,                -- snapshot of the device's customer at session time
+                session_key TEXT NOT NULL DEFAULT '',
+                started REAL NOT NULL,
+                ended REAL,                         -- NULL while the session is still open
+                seconds INTEGER NOT NULL DEFAULT 0,
+                source TEXT NOT NULL DEFAULT 'app', -- 'app' or 'manual'
+                technician TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                created REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_sessions_rd ON sessions(rd_id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started);
             """
         )
         # Columns added after 1.0: local network address, the signed-in Windows
@@ -137,6 +160,9 @@ def init_db() -> None:
         # Computers an administrator has hidden from technician accounts.
         if "hidden" not in have:
             c.execute("ALTER TABLE devices ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+        # Each computer may belong to a customer (client) for time tracking / billing.
+        if "customer_id" not in have:
+            c.execute("ALTER TABLE devices ADD COLUMN customer_id INTEGER")
         if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             user = os.environ.get("PANEL_ADMIN_USER", "admin")
             pw = os.environ.get("PANEL_ADMIN_PASSWORD")
@@ -174,6 +200,29 @@ def check_pw(pw: str, stored: str) -> bool:
 
 def sha256(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
+
+
+def get_setting(key: str, default: str = "") -> str:
+    with db() as c:
+        r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return r["value"] if r else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with db() as c:
+        c.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+
+
+def default_rate() -> float:
+    try:
+        return float(get_setting("default_rate", "0") or 0)
+    except ValueError:
+        return 0.0
+
+
+def currency() -> str:
+    return get_setting("currency", "€")
 
 
 def enc(s: str) -> str:
@@ -275,6 +324,8 @@ def device_view(r: sqlite3.Row) -> dict:
         "os_user": r["os_user"],
         "kind": r["kind"],
         "hidden": bool(r["hidden"]),
+        "customer_id": r["customer_id"],
+        "customer_name": (r["customer_name"] if "customer_name" in r.keys() else None),
     }
 
 
@@ -426,9 +477,13 @@ def me(u=Depends(current_user)):
 
 @app.get("/api/devices")
 def list_devices(u=Depends(current_user)):
-    where = "" if u["role"] == "admin" else "WHERE hidden=0"
+    where = "" if u["role"] == "admin" else "WHERE d.hidden=0"
     with db() as c:
-        rows = c.execute(f"SELECT * FROM devices {where} ORDER BY name COLLATE NOCASE").fetchall()
+        rows = c.execute(
+            f"SELECT d.*, cu.name AS customer_name FROM devices d "
+            f"LEFT JOIN customers cu ON cu.id = d.customer_id {where} "
+            f"ORDER BY d.name COLLATE NOCASE"
+        ).fetchall()
     return [device_view(r) for r in rows]
 
 
@@ -484,6 +539,7 @@ class DeviceEdit(BaseModel):
     phone: Optional[str] = Field(default=None, max_length=40)
     notes: Optional[str] = Field(default=None, max_length=2000)
     hidden: Optional[bool] = None
+    customer_id: Optional[int] = None  # 0 clears the assignment
 
 
 @app.patch("/api/devices/{rd_id}")
@@ -498,6 +554,13 @@ def device_edit(rd_id: str, body: DeviceEdit, u=Depends(current_user)):
         if u["role"] != "admin":
             raise HTTPException(403, "Only administrators can hide computers")
         fields["hidden"] = 1 if body.hidden else 0
+    if body.customer_id is not None:
+        cid = body.customer_id or None
+        if cid is not None:
+            with db() as c:
+                if not c.execute("SELECT 1 FROM customers WHERE id=?", (cid,)).fetchone():
+                    raise HTTPException(404, "Unknown customer")
+        fields["customer_id"] = cid
     if fields:
         sets = ", ".join(f"{k}=?" for k in fields)
         with db() as c:
@@ -513,6 +576,236 @@ def device_delete(rd_id: str, u=Depends(admin_user)):
         c.execute("DELETE FROM devices WHERE rd_id=?", (rd_id,))
     audit(u["username"], "delete", rd_id, r["name"])
     return {"ok": True}
+
+
+# --- customers (clients that computers belong to) ---------------------------
+def customer_view(r: sqlite3.Row, admin: bool) -> dict:
+    v = {
+        "id": r["id"],
+        "name": r["name"],
+        "contact": r["contact"],
+        "notes": r["notes"],
+        "computers": r["computers"] if "computers" in r.keys() else 0,
+    }
+    if admin:
+        v["rate"] = r["rate"]  # None = use the global default
+        v["effective_rate"] = r["rate"] if r["rate"] is not None else default_rate()
+    return v
+
+
+@app.get("/api/customers")
+def customers_list(u=Depends(current_user)):
+    admin = u["role"] == "admin"
+    with db() as c:
+        rows = c.execute(
+            "SELECT cu.*, (SELECT COUNT(*) FROM devices d WHERE d.customer_id=cu.id) AS computers "
+            "FROM customers cu ORDER BY cu.name COLLATE NOCASE"
+        ).fetchall()
+    return {"default_rate": default_rate() if admin else None,
+            "currency": currency(),
+            "customers": [customer_view(r, admin) for r in rows]}
+
+
+class CustomerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    contact: str = Field(default="", max_length=200)
+    rate: Optional[float] = Field(default=None, ge=0, le=100000)
+    notes: str = Field(default="", max_length=2000)
+
+
+@app.post("/api/customers")
+def customer_create(body: CustomerIn, u=Depends(admin_user)):
+    with db() as c:
+        cur = c.execute(
+            "INSERT INTO customers (name, contact, rate, notes, created) VALUES (?,?,?,?,?)",
+            (body.name.strip(), body.contact.strip(), body.rate, body.notes.strip(), time.time()),
+        )
+        cid = cur.lastrowid
+    audit(u["username"], "customer-create", detail=body.name.strip())
+    return {"id": cid}
+
+
+@app.patch("/api/customers/{cid}")
+def customer_edit(cid: int, body: CustomerIn, u=Depends(admin_user)):
+    with db() as c:
+        if not c.execute("SELECT 1 FROM customers WHERE id=?", (cid,)).fetchone():
+            raise HTTPException(404, "Unknown customer")
+        c.execute("UPDATE customers SET name=?, contact=?, rate=?, notes=? WHERE id=?",
+                  (body.name.strip(), body.contact.strip(), body.rate, body.notes.strip(), cid))
+    audit(u["username"], "customer-edit", detail=body.name.strip())
+    return {"ok": True}
+
+
+@app.delete("/api/customers/{cid}")
+def customer_delete(cid: int, u=Depends(admin_user)):
+    with db() as c:
+        r = c.execute("SELECT name FROM customers WHERE id=?", (cid,)).fetchone()
+        if not r:
+            raise HTTPException(404, "Unknown customer")
+        c.execute("UPDATE devices SET customer_id=NULL WHERE customer_id=?", (cid,))
+        c.execute("DELETE FROM customers WHERE id=?", (cid,))
+    audit(u["username"], "customer-delete", detail=r["name"])
+    return {"ok": True}
+
+
+class BillingIn(BaseModel):
+    default_rate: float = Field(ge=0, le=100000)
+    currency: str = Field(default="€", max_length=8)
+
+
+@app.put("/api/billing")
+def billing_save(body: BillingIn, u=Depends(admin_user)):
+    set_setting("default_rate", str(body.default_rate))
+    set_setting("currency", body.currency.strip() or "€")
+    audit(u["username"], "billing-edit", detail=f"{body.default_rate} {body.currency}")
+    return {"ok": True}
+
+
+# --- session reporting (from the controlled computer's app) -----------------
+class SessionIn(BaseModel):
+    id: str = Field(min_length=3, max_length=40)
+    secret: str = Field(min_length=10, max_length=128)
+    event: str = Field(pattern="^(start|end)$")
+    session_key: str = Field(min_length=1, max_length=80)
+
+
+@app.post("/api/client/session")
+def client_session(body: SessionIn):
+    now = time.time()
+    with db() as c:
+        r = c.execute("SELECT * FROM devices WHERE rd_id=?", (body.id,)).fetchone()
+        if not r or not hmac.compare_digest(r["secret_hash"], sha256(body.secret)):
+            raise HTTPException(401, "Unknown device")
+        if body.event == "start":
+            open_row = c.execute(
+                "SELECT id FROM sessions WHERE rd_id=? AND session_key=? AND ended IS NULL",
+                (body.id, body.session_key)).fetchone()
+            if not open_row:
+                tech = ""
+                a = c.execute(
+                    "SELECT actor FROM audit WHERE rd_id=? AND action='connect' AND ts>=? "
+                    "ORDER BY ts DESC LIMIT 1", (body.id, now - 300)).fetchone()
+                if a:
+                    tech = a["actor"]
+                c.execute(
+                    "INSERT INTO sessions (rd_id, customer_id, session_key, started, source, "
+                    "technician, created) VALUES (?,?,?,?,?,?,?)",
+                    (body.id, r["customer_id"], body.session_key, now, "app", tech, now))
+        else:  # end
+            row = c.execute(
+                "SELECT id, started FROM sessions WHERE rd_id=? AND session_key=? AND ended IS NULL "
+                "ORDER BY started DESC LIMIT 1", (body.id, body.session_key)).fetchone()
+            if row:
+                secs = max(0, int(now - row["started"]))
+                c.execute("UPDATE sessions SET ended=?, seconds=? WHERE id=?", (now, secs, row["id"]))
+    return {"ok": True}
+
+
+# --- dashboard / statistics -------------------------------------------------
+def _month_key(ts: float) -> str:
+    return time.strftime("%Y-%m", time.gmtime(ts))
+
+
+@app.get("/api/dashboard")
+def dashboard(u=Depends(current_user)):
+    admin = u["role"] == "admin"
+    now = time.time()
+    this_month = time.strftime("%Y-%m", time.gmtime(now))
+    rate_default = default_rate()
+    with db() as c:
+        # customer id -> effective rate
+        crates = {}
+        cnames = {}
+        for row in c.execute("SELECT id, name, rate FROM customers"):
+            crates[row["id"]] = row["rate"] if row["rate"] is not None else rate_default
+            cnames[row["id"]] = row["name"]
+        devnames = {row["rd_id"]: row["name"] for row in c.execute("SELECT rd_id, name FROM devices")}
+        online_now = sum(1 for row in c.execute("SELECT last_seen FROM devices")
+                         if now - row["last_seen"] < ONLINE_SECONDS)
+        total_computers = c.execute("SELECT COUNT(*) n FROM devices").fetchone()["n"]
+        total_customers = c.execute("SELECT COUNT(*) n FROM customers").fetchone()["n"]
+
+        done = c.execute(
+            "SELECT rd_id, customer_id, started, seconds FROM sessions WHERE ended IS NOT NULL"
+        ).fetchall()
+        open_now = c.execute("SELECT COUNT(*) n FROM sessions WHERE ended IS NULL").fetchone()["n"]
+
+    # aggregate in Python (session volumes are small)
+    months = {}
+    per_customer = {}
+    per_computer = {}
+    sessions_month = 0
+    for s in done:
+        mk = _month_key(s["started"])
+        secs = s["seconds"] or 0
+        cid = s["customer_id"]
+        rate = crates.get(cid, rate_default)
+        months.setdefault(mk, {"seconds": 0, "charge": 0.0, "sessions": 0})
+        months[mk]["seconds"] += secs
+        months[mk]["charge"] += secs / 3600 * rate
+        months[mk]["sessions"] += 1
+        if mk == this_month:
+            sessions_month += 1
+            pc = per_customer.setdefault(cid, {"seconds": 0, "sessions": 0})
+            pc["seconds"] += secs; pc["sessions"] += 1
+            pk = per_computer.setdefault(s["rd_id"], {"seconds": 0, "sessions": 0})
+            pk["seconds"] += secs; pk["sessions"] += 1
+
+    # last 6 months, oldest first, gaps filled
+    series = []
+    cm = time.gmtime(now)
+    y, m = cm.tm_year, cm.tm_mon
+    buckets = []
+    for _ in range(6):
+        buckets.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12; y -= 1
+    for mk in reversed(buckets):
+        d = months.get(mk, {"seconds": 0, "charge": 0.0, "sessions": 0})
+        row = {"month": mk, "hours": round(d["seconds"] / 3600, 2), "sessions": d["sessions"]}
+        if admin:
+            row["charge"] = round(d["charge"], 2)
+        series.append(row)
+
+    customers_out = []
+    for cid, d in per_customer.items():
+        hours = d["seconds"] / 3600
+        row = {"customer_id": cid,
+               "name": cnames.get(cid, "Unassigned") if cid else "Unassigned",
+               "hours": round(hours, 2), "sessions": d["sessions"]}
+        if admin:
+            row["charge"] = round(hours * crates.get(cid, rate_default), 2)
+        customers_out.append(row)
+    customers_out.sort(key=lambda x: x["hours"], reverse=True)
+
+    computers_out = []
+    for rid, d in per_computer.items():
+        computers_out.append({"rd_id": rid, "name": devnames.get(rid, rid),
+                              "hours": round(d["seconds"] / 3600, 2), "sessions": d["sessions"]})
+    computers_out.sort(key=lambda x: x["hours"], reverse=True)
+
+    hours_month = round(sum(d["seconds"] for cid, d in per_customer.items()) / 3600, 2)
+    out = {
+        "currency": currency(),
+        "month": this_month,
+        "tiles": {
+            "online_now": online_now,
+            "active_sessions": open_now,
+            "total_computers": total_computers,
+            "total_customers": total_customers,
+            "sessions_month": sessions_month,
+            "hours_month": hours_month,
+        },
+        "months": series,
+        "customers": customers_out,
+        "computers": computers_out[:20],
+    }
+    if admin:
+        out["tiles"]["charge_month"] = round(
+            sum(c["charge"] for c in customers_out), 2)
+        out["default_rate"] = rate_default
+    return out
 
 
 @app.get("/api/audit")

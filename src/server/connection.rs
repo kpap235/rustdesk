@@ -6957,6 +6957,18 @@ mod raii {
                     .unwrap()
                     .on_connection_open(conn_id);
             }
+            // Exelixisnet: report the start of a support session (first remote conn in).
+            if conn_type == AuthConnType::Remote {
+                let remote_count = AUTHED_CONNS
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|c| c.conn_type == AuthConnType::Remote)
+                    .count();
+                if remote_count == 1 {
+                    crate::exelixis::on_remote_session_start();
+                }
+            }
             Self(conn_id, conn_type)
         }
 
@@ -7089,6 +7101,10 @@ mod raii {
                 .iter()
                 .filter(|c| c.conn_type == AuthConnType::Remote)
                 .count();
+            // Exelixisnet: report the end of a support session (last remote conn out).
+            if self.1 == AuthConnType::Remote && remote_count == 0 {
+                crate::exelixis::on_remote_session_end();
+            }
             if remote_count == 0 {
                 #[cfg(any(target_os = "windows", target_os = "linux"))]
                 {
