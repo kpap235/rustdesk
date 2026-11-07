@@ -194,6 +194,11 @@
   .pwrow { display: flex; gap: 8px; }
   .pwrow input { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
 
+  .dl-list { display: grid; gap: 14px; max-width: 860px; }
+  .dl-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .dl-row input { flex: 1 1 320px; min-width: 0; padding: 11px 12px; border: 1.5px solid var(--line); border-radius: var(--radius-s); background: var(--paper); font-size: 13px; }
+  .dl-row input:not([readonly]) { background: var(--surface); border-color: var(--blue); }
+  a.btn { text-decoration: none; }
   .changelog { display: grid; gap: 14px; max-width: 760px; }
   .changelog .release { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); padding: 18px 22px; }
   .changelog .release.current { border-color: var(--blue); box-shadow: inset 4px 0 0 var(--blue); }
@@ -269,6 +274,7 @@
       <button data-tab="devices" class="on">Customers <span class="badge" id="navOnline">0</span></button>
       <button data-tab="users" class="admin-only">Technicians</button>
       <button data-tab="audit" class="admin-only">Activity</button>
+      <button data-tab="downloads">Downloads</button>
       <button data-tab="account">My account</button>
       <button data-tab="news">What's new</button>
     </nav>
@@ -333,6 +339,37 @@
           <thead><tr><th>When</th><th>Who</th><th>What</th><th>Computer</th><th>Details</th></tr></thead>
           <tbody id="auditRows"></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Downloads -->
+    <div id="tab-downloads" class="hidden">
+      <div class="page-head"><div><h1 class="slant">Downloads</h1><p>Links to the app for customers. Copy a link and send it by e-mail, Viber or SMS.</p></div></div>
+      <div class="dl-list">
+        <div class="panel dl">
+          <h2>Windows</h2>
+          <p class="lead">For PCs and laptops. The customer runs it and clicks Install.</p>
+          <div class="dl-row">
+            <input id="dlWin" type="url" readonly aria-label="Windows download link">
+            <button class="btn btn-primary" data-copy="dlWin">Copy link</button>
+            <a class="btn btn-quiet" id="dlWinOpen" target="_blank" rel="noopener">Download</a>
+          </div>
+        </div>
+        <div class="panel dl">
+          <h2>Android</h2>
+          <p class="lead">For phones and tablets. The customer opens it on the phone and allows the installation.</p>
+          <div class="dl-row">
+            <input id="dlAnd" type="url" readonly aria-label="Android download link">
+            <button class="btn btn-primary" data-copy="dlAnd">Copy link</button>
+            <a class="btn btn-quiet" id="dlAndOpen" target="_blank" rel="noopener">Download</a>
+          </div>
+        </div>
+        <div class="admin-only" id="dlAdmin">
+          <button class="btn btn-quiet" id="dlEdit">Change links</button>
+          <button class="btn btn-primary hidden" id="dlSave">Save links</button>
+          <button class="btn btn-quiet hidden" id="dlCancel">Cancel</button>
+          <div class="err" id="dlErr" role="alert"></div>
+        </div>
       </div>
     </div>
 
@@ -485,8 +522,9 @@ async function start() {
 // ---------- sections ----------
 document.querySelectorAll('.rail nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.rail nav button').forEach(x => x.classList.toggle('on', x === b));
-  ['devices', 'account', 'users', 'audit', 'news'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  ['devices', 'account', 'users', 'audit', 'news', 'downloads'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
   if (b.dataset.tab === 'news') loadNews();
+  if (b.dataset.tab === 'downloads') loadDownloads();
   if (b.dataset.tab === 'users') loadUsers();
   if (b.dataset.tab === 'audit') loadAudit();
   if (b.dataset.tab === 'devices') $('#search').focus();
@@ -630,6 +668,33 @@ $('#userForm').addEventListener('submit', async (e) => {
   } catch (err) { $('#userErr').textContent = err.message; }
 });
 
+// ---------- downloads ----------
+let downloads = { windows: '', android: '' };
+function showDownloads(editing) {
+  $('#dlWin').value = downloads.windows; $('#dlAnd').value = downloads.android;
+  $('#dlWinOpen').href = downloads.windows || '#'; $('#dlAndOpen').href = downloads.android || '#';
+  [$('#dlWin'), $('#dlAnd')].forEach(i => { i.readOnly = !editing; });
+  $('#dlEdit').classList.toggle('hidden', editing);
+  $('#dlSave').classList.toggle('hidden', !editing); $('#dlCancel').classList.toggle('hidden', !editing);
+  $('#dlErr').textContent = '';
+  if (editing) $('#dlWin').focus();
+}
+async function loadDownloads() { downloads = await api('/api/downloads'); showDownloads(false); }
+document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
+  const v = $('#' + b.dataset.copy).value;
+  if (!v) return toast('No link set yet');
+  try { await navigator.clipboard.writeText(v); } catch (e) { $('#' + b.dataset.copy).select(); document.execCommand('copy'); }
+  toast('Link copied');
+});
+$('#dlEdit').onclick = () => showDownloads(true);
+$('#dlCancel').onclick = () => showDownloads(false);
+$('#dlSave').onclick = async () => {
+  try {
+    downloads = await api('/api/downloads', { method: 'PUT', body: { windows: $('#dlWin').value.trim(), android: $('#dlAnd').value.trim() } });
+    showDownloads(false); toast('Links saved');
+  } catch (err) { $('#dlErr').textContent = err.message; }
+};
+
 // ---------- what's new ----------
 function inlineMd(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>'); }
 async function loadNews() {
@@ -666,7 +731,7 @@ const actionNames = {
   'login': 'Signed in', 'connect': 'Connected', 'reveal-password': 'Viewed password', 'edit': 'Edited customer',
   'delete': 'Removed computer', 'register': 'New computer', 're-register': 'Computer registered again',
   'id-changed': 'Computer ID changed', 'password-updated': 'Access password updated', 'user-create': 'Added technician',
-  'user-edit': 'Changed technician', 'password-change': 'Changed own password', '2fa-enabled': 'Turned on two-factor',
+  'user-edit': 'Changed technician', 'downloads-edit': 'Changed download links', 'password-change': 'Changed own password', '2fa-enabled': 'Turned on two-factor',
 };
 async function loadAudit() {
   const rows = await api('/api/audit');

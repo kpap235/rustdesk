@@ -110,6 +110,10 @@ def init_db() -> None:
                 created REAL NOT NULL,
                 last_seen REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS audit (
                 id INTEGER PRIMARY KEY,
                 ts REAL NOT NULL,
@@ -556,6 +560,42 @@ def me_2fa_confirm(body: CodeIn, u=Depends(current_user)):
     _pending_totp.pop(u["id"], None)
     audit(u["username"], "2fa-enabled")
     return {"ok": True}
+
+
+# --- download links for customers -------------------------------------------
+DOWNLOAD_DEFAULTS = {
+    "download_windows": "https://github.com/kpap235/rustdesk/releases/download/v1.0.1/ExelixisnetITSupport-1.0.1-windows-x64.exe",
+    "download_android": "https://github.com/kpap235/rustdesk/releases/download/v1.0.1/ExelixisnetITSupport-1.0.1-android-arm64.apk",
+}
+
+
+def get_downloads() -> dict:
+    with db() as c:
+        rows = dict(c.execute("SELECT key, value FROM settings WHERE key LIKE 'download_%'").fetchall())
+    return {k[len("download_"):]: rows.get(k, v) for k, v in DOWNLOAD_DEFAULTS.items()}
+
+
+class DownloadsIn(BaseModel):
+    windows: str = Field(max_length=500)
+    android: str = Field(max_length=500)
+
+
+@app.get("/api/downloads")
+def downloads(u=Depends(current_user)):
+    return get_downloads()
+
+
+@app.put("/api/downloads")
+def downloads_save(body: DownloadsIn, u=Depends(admin_user)):
+    values = {"download_windows": body.windows.strip(), "download_android": body.android.strip()}
+    for v in values.values():
+        if v and not v.startswith("https://"):
+            raise HTTPException(400, "Links must start with https://")
+    with db() as c:
+        for k, v in values.items():
+            c.execute("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
+    audit(u["username"], "downloads-edit", detail=json.dumps(values))
+    return get_downloads()
 
 
 # --- ExelixisHub API (API key) ----------------------------------------------
