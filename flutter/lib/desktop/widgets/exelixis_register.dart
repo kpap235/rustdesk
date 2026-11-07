@@ -171,11 +171,14 @@ Widget exelixisSupportContact(BuildContext context) {
   final style = TextStyle(fontSize: 12, color: Theme.of(context).hintColor);
   return Padding(
     padding: const EdgeInsets.only(left: 12, right: 12, top: 6),
-    child: Column(children: [
-      Text('IT Support', style: style.copyWith(fontWeight: FontWeight.w600)),
-      SelectableText('$kExelixisPhone  ·  $kExelixisEmail', style: style),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+      Text('IT Support',
+          textAlign: TextAlign.center,
+          style: style.copyWith(fontWeight: FontWeight.w600)),
+      SelectableText('$kExelixisPhone  ·  $kExelixisEmail',
+          textAlign: TextAlign.center, style: style),
       Text('Version ${_exelixisVersion()}',
-          style: style.copyWith(fontSize: 11)),
+          textAlign: TextAlign.center, style: style.copyWith(fontSize: 11)),
     ]),
   );
 }
