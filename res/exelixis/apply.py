@@ -48,6 +48,12 @@ PATCHES = [
         f'pub const RS_PUB_KEY: &str = "{PUB_KEY}";',
     ),
     (
+        # Makes the app treat our server as its own server, not the public one
+        # (no "please set up your own server" tip).
+        r'pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new\("[^"]*"\.to_owned\(\)\);',
+        f'pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("{SERVER}".to_owned());',
+    ),
+    (
         r'pub static ref APP_NAME: RwLock<String> = RwLock::new\("[^"]*"\.to_owned\(\)\);',
         f'pub static ref APP_NAME: RwLock<String> = RwLock::new("{APP_NAME}".to_owned());',
     ),

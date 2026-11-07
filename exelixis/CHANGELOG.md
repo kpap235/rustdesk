@@ -12,6 +12,14 @@ version was already released, so every release has its own number and notes.
 
 Based on RustDesk (AGPL-3.0); the RustDesk version each release is built on is shown in brackets.
 
+## 1.0.2 — 2026-11-07 (RustDesk 1.5.1)
+
+### App (Windows and Android)
+- Removed the wrong tip "For faster connection, please set up your own server": the app now
+  knows rustdesk.exelixisnet.gr is our own server (connections already went through it).
+- Account and address-book requests now go to our server instead of RustDesk's public site,
+  as in any standard self-hosted setup.
+
 ## 1.0.1 — 2026-11-07 (RustDesk 1.5.1)
 
 ### App (Windows)
