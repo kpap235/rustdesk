@@ -177,18 +177,20 @@
 
   .roster { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); overflow: hidden; }
   .pc {
-    display: grid; grid-template-columns: 6px minmax(0, 1.6fr) minmax(0, 1.2fr) minmax(0, .9fr) auto;
-    align-items: center; gap: 0 18px; padding: 14px 18px 14px 0; border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: 6px minmax(0, 1fr) minmax(0, auto) auto;
+    align-items: center; gap: 0 20px; padding: 14px 18px 14px 0; border-top: 1px solid var(--line);
   }
   .pc:first-child { border-top: 0; }
   .pc .signal { align-self: stretch; background: transparent; margin: -14px 0; }
   .pc.live .signal { background: var(--live); }
-  .pc .who strong { font-size: 16px; font-weight: 700; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pc .who span, .pc .machine span { color: var(--muted); font-size: 13px; }
-  .pc .machine { font-size: 14px; overflow: hidden; }
-  .pc .machine div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .pc .rid { font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: .02em; }
-  .pc .state { font-size: 14px; }
+  .pc .main { min-width: 0; }
+  .pc .main .nm { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 0; }
+  .pc .main strong { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .pc .main .ips { color: var(--muted); font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pc .main .rid { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: .02em; }
+  .pc .cust { text-align: right; font-size: 12px; line-height: 1.4; max-width: 220px; }
+  .pc .cust .c { display: block; color: var(--navy); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pc .cust .p { display: block; color: var(--muted); }
   .pill { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; padding: 3px 10px; border-radius: 99px; }
   .pill.live { background: var(--live-soft); color: var(--live); }
   .pill.live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 2s ease-in-out infinite; }
@@ -197,10 +199,12 @@
   .pill.kind-f { background: rgba(11,79,163,.12); color: #0B4FA3; font-size: 11px; padding: 1px 8px; margin-left: 8px; }
   .pill.kind-m { background: rgba(93,107,133,.16); color: var(--muted); font-size: 11px; padding: 1px 8px; margin-left: 8px; }
   .pill.kind-h { background: rgba(93,107,133,.16); color: var(--muted); font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+  .pill.ver { background: rgba(93,107,133,.12); color: var(--muted); font-size: 11px; padding: 1px 8px; margin-left: 6px; font-weight: 600; }
   @keyframes pulse { 50% { opacity: .35; } }
   @media (prefers-reduced-motion: reduce) { .pill.live::before { animation: none; } }
-  .pc .act { display: flex; gap: 8px; }
+  .pc .act { display: flex; gap: 10px; align-items: center; }
   .pc .act .btn-quiet { padding: 10px 12px; }
+  .pc .act .pill { white-space: nowrap; }
   .empty { padding: 48px 24px; text-align: center; color: var(--muted); }
   .empty strong { display: block; color: var(--ink); font-size: 17px; margin-bottom: 6px; }
 
@@ -266,10 +270,12 @@
     .rail-foot strong, .rail-foot span { display: none; }
     .rail-foot button { margin: 0; }
     .two { grid-template-columns: 1fr; }
-    .pc { grid-template-columns: 6px minmax(0, 1fr) auto; row-gap: 6px; }
-    .pc .machine { grid-column: 2; grid-row: 2; }
-    .pc .state { grid-column: 3; grid-row: 1; justify-self: end; }
-    .pc .act { grid-column: 2 / 4; grid-row: 3; }
+    .pc { grid-template-columns: 6px minmax(0, 1fr) auto; row-gap: 8px; }
+    .pc .main { grid-column: 2 / 4; grid-row: 1; }
+    .pc .cust { grid-column: 2 / 4; grid-row: 2; text-align: left; max-width: none; }
+    .pc .cust .c { display: inline; }
+    .pc .cust .p { display: inline; margin-left: 8px; }
+    .pc .act { grid-column: 2 / 4; grid-row: 3; flex-wrap: wrap; }
     .pc .act .btn-primary { flex: 1; }
     .pc .signal { grid-row: 1 / 4; }
   }
@@ -334,8 +340,8 @@
       <button data-tab="dashboard" class="on">Dashboard</button>
       <button data-tab="devices">Computers <span class="badge" id="navOnline">0</span></button>
       <button data-tab="customers">Customers</button>
-      <button data-tab="users" class="admin-only">Technicians</button>
-      <button data-tab="audit" class="admin-only">Activity</button>
+      <button data-tab="users" class="manager-only">Technicians</button>
+      <button data-tab="audit" class="manager-only">Activity</button>
       <button data-tab="downloads">Downloads</button>
       <button data-tab="account">My account</button>
       <button data-tab="news">What's new</button>
@@ -375,7 +381,7 @@
     <div id="tab-customers" class="hidden">
       <div class="page-head">
         <div><h1 class="slant">Customers</h1><p>Clients you support. Assign computers to a customer to track time and charges.</p></div>
-        <button class="btn btn-primary admin-only" id="addCust">+ Add customer</button>
+        <button class="btn btn-primary manager-only" id="addCust">+ Add customer</button>
       </div>
       <div class="panel admin-only" id="billingPanel" style="margin-bottom:18px">
         <h2>Billing</h2>
@@ -399,10 +405,10 @@
     <div id="tab-devices" class="hidden">
       <div class="page-head">
         <div>
-          <h1 class="slant">Customers</h1>
+          <h1 class="slant">Computers</h1>
           <p id="stats">Loading…</p>
         </div>
-        <button class="btn btn-primary admin-only" id="addPc">+ Add computer</button>
+        <button class="btn btn-primary manager-only" id="addPc">+ Add computer</button>
       </div>
       <div class="finder">
         <label class="search">
@@ -555,9 +561,13 @@
     <label class="field"><span>Access password</span>
       <div class="pwrow"><input id="dlgPw" readonly placeholder="Hidden"><button type="button" class="btn btn-quiet" id="dlgReveal">Show</button></div>
     </label>
-    <label class="checkrow admin-only" id="dlgHiddenRow">
+    <label class="checkrow manager-only" id="dlgHiddenRow">
       <input type="checkbox" id="dlgHidden">
-      <span>Hide this computer from technicians <small>(only administrators will see it)</small></span>
+      <span>Hide this computer from technicians <small>(supervisors and admins still see it)</small></span>
+    </label>
+    <label class="checkrow admin-only" id="dlgHiddenSupRow">
+      <input type="checkbox" id="dlgHiddenSup">
+      <span>Hide from supervisors too <small>(only administrators will see it)</small></span>
     </label>
     <div class="dlg-actions">
       <button type="button" class="btn btn-danger spacer admin-only" id="dlgDelete">Remove</button>
@@ -594,7 +604,7 @@
     <h2 class="slant" id="custDlgTitle">Add customer</h2>
     <label class="field"><span>Name or company *</span><input id="cuName" maxlength="160" required></label>
     <label class="field"><span>Contact (phone / e-mail)</span><input id="cuContact" maxlength="200"></label>
-    <label class="field"><span>Rate per hour <small class="muted">(leave empty to use the default)</small></span><input id="cuRate" type="number" min="0" step="1"></label>
+    <label class="field admin-only"><span>Rate per hour <small class="muted">(leave empty to use the default)</small></span><input id="cuRate" type="number" min="0" step="1"></label>
     <label class="field"><span>Notes</span><textarea id="cuNotes" rows="2" maxlength="2000"></textarea></label>
     <div class="err" id="cuErr" role="alert"></div>
     <div class="dlg-actions">
@@ -614,7 +624,11 @@
     <label class="field"><span>Full name</span><input id="uName" maxlength="80"></label>
     <label class="field"><span id="uPwLabel">Temporary password (at least 10 characters)</span><input id="uPw" type="password" minlength="10" autocomplete="new-password"></label>
     <label class="field"><span>Role</span>
-      <select id="uRole"><option value="tech">Technician: customers and own account</option><option value="admin">Administrator: also technicians and activity</option></select>
+      <select id="uRole">
+        <option value="tech">Technician: computers and own account</option>
+        <option value="supervisor" class="admin-only-opt">Supervisor: also technicians and customers</option>
+        <option value="admin" class="admin-only-opt">Administrator: full control and billing</option>
+      </select>
     </label>
     <label class="check" id="uActiveWrap"><input type="checkbox" id="uActive"> Can sign in</label>
     <label class="check" id="uResetWrap"><input type="checkbox" id="uReset2fa"> Reset two-factor (new phone)</label>
@@ -684,6 +698,7 @@ async function start() {
   $('#whoName').textContent = me.full_name || me.username;
   $('#panelVer').textContent = me.panel_version ? `Panel version ${me.panel_version}` : '';
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', me.role !== 'admin'));
+  document.querySelectorAll('.manager-only').forEach(el => el.classList.toggle('hidden', me.role === 'tech'));
   $('#tfaOn').classList.toggle('hidden', !me.totp); $('#tfaOff').classList.toggle('hidden', me.totp);
   loadDashboard();
   loadCustomers();
@@ -722,17 +737,30 @@ function renderDevices() {
   $('#devEmpty').classList.toggle('hidden', devices.length > 0);
   $('#devNoMatch').classList.toggle('hidden', !(devices.length > 0 && rows.length === 0));
   $('#devRows').classList.toggle('hidden', rows.length === 0);
-  $('#devRows').innerHTML = rows.map(d => `
-    <li class="pc ${d.online ? 'live' : ''}">
+  $('#devRows').innerHTML = rows.map(d => {
+    const ver = (d.app_version || '').split(' ')[0];
+    const kindPill = d.kind === 'quick' ? '<span class="pill kind-q">Quick</span>'
+      : d.kind === 'full' ? '<span class="pill kind-f">Full</span>'
+      : d.kind === 'manual' ? '<span class="pill kind-m">Manual</span>' : '';
+    const badges = kindPill
+      + (ver ? `<span class="pill ver">v${esc(ver)}</span>` : '')
+      + (d.hidden ? '<span class="pill kind-h">Hidden</span>' : '')
+      + (d.hidden_sup ? '<span class="pill kind-h">Admin-only</span>' : '');
+    return `<li class="pc ${d.online ? 'live' : ''}">
       <span class="signal" aria-hidden="true"></span>
-      <div class="who"><strong>${esc(d.name)}</strong>${d.kind === 'quick' ? '<span class="pill kind-q">Quick</span>' : d.kind === 'full' ? '<span class="pill kind-f">Full</span>' : d.kind === 'manual' ? '<span class="pill kind-m">Manual</span>' : ''}${d.hidden ? '<span class="pill kind-h">Hidden</span>' : ''}<span>${esc(d.phone || '')}</span></div>
-      <div class="machine"><div>${esc(d.hostname || '—')}${d.local_ip ? ' · ' + esc(d.local_ip) : ''}${d.customer_name ? ' · <span style="color:var(--navy);font-weight:600">' + esc(d.customer_name) + '</span>' : ''}</div><span class="rid">ID ${esc(fmtId(d.id))}</span></div>
-      <div class="state">${d.online ? '<span class="pill live">Online</span>' : `<span class="pill idle">Seen ${ago(d.last_seen)}</span>`}</div>
+      <div class="main">
+        <div class="nm"><strong>${esc(d.name)}</strong>${badges}</div>
+        <div class="ips">${esc(d.local_ip || '—')}${d.last_ip ? ' · WAN ' + esc(d.last_ip) : ''}</div>
+        <span class="rid">ID ${esc(fmtId(d.id))}</span>
+      </div>
+      <div class="cust">${d.customer_name ? `<span class="c">${esc(d.customer_name)}</span>` : ''}${d.phone ? `<span class="p">${esc(d.phone)}</span>` : ''}</div>
       <div class="act">
+        ${d.online ? '<span class="pill live">Online</span>' : `<span class="pill idle">Seen ${ago(d.last_seen)}</span>`}
         <button class="btn btn-primary" data-connect="${esc(d.id)}" ${d.has_password ? '' : 'title="No password stored: you will be asked for one"'}>Connect</button>
         <button class="btn btn-quiet" data-edit="${esc(d.id)}" aria-label="Details for ${esc(d.name)}">Details</button>
       </div>
-    </li>`).join('');
+    </li>`;
+  }).join('');
 }
 $('#search').oninput = renderDevices;
 document.querySelectorAll('.seg button').forEach(b => b.onclick = () => {
@@ -757,9 +785,10 @@ function openDevice(id) {
   const d = devices.find(x => x.id === id); if (!d) return;
   editId = id;
   $('#dlgTitle').textContent = d.name;
-  $('#dlgId').textContent = `ID ${fmtId(d.id)} · ${d.hostname || 'unknown computer'}${d.local_ip ? ' (' + d.local_ip + ')' : ''}${d.os_user ? ' · user ' + d.os_user : ''} · ${d.os || ''} · app ${d.app_version || '?'}`;
+  $('#dlgId').textContent = `ID ${fmtId(d.id)} · ${d.hostname || 'unknown computer'}${d.local_ip ? ' (' + d.local_ip + ')' : ''}${d.os_user ? ' · user ' + d.os_user : ''} · ${d.os || ''}${d.ram ? ' · ' + d.ram + ' RAM' : ''}${d.disk ? ' · ' + d.disk + ' disk' : ''} · app ${d.app_version || '?'}`;
   $('#dlgName').value = d.name; $('#dlgPhone').value = d.phone; $('#dlgNotes').value = d.notes; $('#dlgPw').value = '';
   $('#dlgHidden').checked = !!d.hidden;
+  $('#dlgHiddenSup').checked = !!d.hidden_sup;
   $('#dlgCustomer').innerHTML = '<option value="0">— Unassigned —</option>' +
     customersCache.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   $('#dlgCustomer').value = d.customer_id || 0;
@@ -775,7 +804,8 @@ $('#devForm').addEventListener('submit', async (e) => {
   try {
     const body = { name: $('#dlgName').value, phone: $('#dlgPhone').value, notes: $('#dlgNotes').value };
     body.customer_id = +$('#dlgCustomer').value;
-    if (me.role === 'admin') body.hidden = $('#dlgHidden').checked;
+    if (me.role === 'admin' || me.role === 'supervisor') body.hidden = $('#dlgHidden').checked;
+    if (me.role === 'admin') body.hidden_sup = $('#dlgHiddenSup').checked;
     await api(`/api/devices/${encodeURIComponent(editId)}`, { method: 'PATCH', body });
     $('#devDlg').close(); loadDevices(); toast('Changes saved');
   } catch (err) { toast(err.message); }
@@ -831,7 +861,7 @@ async function loadUsers() {
     <tr>
       <td><b>${esc(u.full_name || u.username)}</b></td>
       <td class="muted">${esc(u.username)}</td>
-      <td>${u.role === 'admin' ? 'Administrator' : 'Technician'}</td>
+      <td>${u.role === 'admin' ? 'Administrator' : u.role === 'supervisor' ? 'Supervisor' : 'Technician'}</td>
       <td>${u.totp ? '<span class="tag">On</span>' : '<span class="tag off">Not set up</span>'}</td>
       <td>${u.active ? 'Active' : '<span class="muted">Disabled</span>'}</td>
       <td class="right"><button class="btn btn-quiet" data-user="${u.id}">Edit</button></td>
@@ -846,6 +876,8 @@ function openUser(u) {
   $('#uUser').value = u ? u.username : ''; $('#uUser').disabled = !!u;
   $('#uName').value = u ? u.full_name : ''; $('#uPw').value = ''; $('#uPw').required = !u;
   $('#uPwLabel').textContent = u ? 'New password (leave empty to keep the current one)' : 'Temporary password (at least 10 characters)';
+  // Only admins may assign supervisor/admin roles; supervisors manage technicians only.
+  document.querySelectorAll('#uRole .admin-only-opt').forEach(o => { o.disabled = me.role !== 'admin'; o.hidden = me.role !== 'admin'; });
   $('#uRole').value = u ? u.role : 'tech';
   $('#uActive').checked = u ? !!u.active : true; $('#uActiveWrap').classList.toggle('hidden', !u);
   $('#uReset2fa').checked = false; $('#uResetWrap').classList.toggle('hidden', !u || !u.totp);
@@ -905,14 +937,14 @@ let customersCache = [], editCust = null;
 async function loadCustomers() {
   let data; try { data = await api('/api/customers'); } catch (e) { return; }
   customersCache = data.customers;
-  const admin = me.role === 'admin', cur = data.currency || '€';
+  const admin = me.role === 'admin', manager = me.role !== 'tech', cur = data.currency || '€';
   if (admin && data.default_rate != null) { $('#billRate').value = data.default_rate; $('#billCur').value = data.currency; }
   $('#custTable').querySelector('tbody').innerHTML = data.customers.map(c => `<tr>
       <td><strong>${esc(c.name)}</strong></td>
       <td class="muted">${esc(c.contact || '')}</td>
       <td>${c.computers}</td>
       ${admin ? `<td>${c.rate != null ? cur + fmtNum(c.rate) : '<span class="muted">default</span>'}</td>` : ''}
-      <td style="text-align:right">${admin ? `<button class="btn btn-quiet" data-editcust="${c.id}">Edit</button>` : ''}</td>
+      <td style="text-align:right">${manager ? `<button class="btn btn-quiet" data-editcust="${c.id}">Edit</button>` : ''}</td>
     </tr>`).join('');
   $('#custEmpty').classList.toggle('hidden', data.customers.length > 0);
 }

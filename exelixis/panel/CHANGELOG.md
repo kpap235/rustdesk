@@ -3,6 +3,14 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 1.8.0 — 2026-11-07
+- New **Supervisor** role between Administrator and Technician: supervisors manage technicians and
+  customers and can hide computers from technicians, but do not see rates or € amounts (billing
+  stays admin-only). Administrators can also **hide a computer from supervisors**.
+- Redesigned the **computer row**: name on top, then local IP and WAN IP, then the ID; the
+  customer and the app version now show in the row, and Online sits next to Connect.
+- A computer's details now show the reported **Windows version, RAM and disk size** (from app 1.4.0).
+
 ## 1.7.0 — 2026-11-07
 - New **Dashboard** with this month's figures: computers online, sessions in progress, hours
   worked, amount charged (admins), and a six-month hours chart, plus **time and charges per

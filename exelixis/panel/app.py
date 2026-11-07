@@ -94,7 +94,7 @@ def init_db() -> None:
                 username TEXT UNIQUE NOT NULL,
                 full_name TEXT NOT NULL DEFAULT '',
                 pw_hash TEXT NOT NULL,
-                role TEXT NOT NULL CHECK (role IN ('admin','tech')),
+                role TEXT NOT NULL CHECK (role IN ('admin','supervisor','tech')),
                 totp_secret TEXT NOT NULL DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1,
                 session_gen INTEGER NOT NULL DEFAULT 0,
@@ -163,6 +163,35 @@ def init_db() -> None:
         # Each computer may belong to a customer (client) for time tracking / billing.
         if "customer_id" not in have:
             c.execute("ALTER TABLE devices ADD COLUMN customer_id INTEGER")
+        # Computers an administrator has hidden from supervisors (and so from technicians too).
+        if "hidden_sup" not in have:
+            c.execute("ALTER TABLE devices ADD COLUMN hidden_sup INTEGER NOT NULL DEFAULT 0")
+        # Hardware the app reports: total RAM and the main disk size.
+        for col in ("ram", "disk"):
+            if col not in have:
+                c.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+        # Allow the 'supervisor' role on an older users table whose CHECK predates it.
+        urow = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
+        if urow and "supervisor" not in (urow["sql"] or ""):
+            c.executescript(
+                """
+                CREATE TABLE users_new (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    full_name TEXT NOT NULL DEFAULT '',
+                    pw_hash TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK (role IN ('admin','supervisor','tech')),
+                    totp_secret TEXT NOT NULL DEFAULT '',
+                    active INTEGER NOT NULL DEFAULT 1,
+                    session_gen INTEGER NOT NULL DEFAULT 0,
+                    created REAL NOT NULL
+                );
+                INSERT INTO users_new SELECT id, username, full_name, pw_hash, role,
+                    totp_secret, active, session_gen, created FROM users;
+                DROP TABLE users;
+                ALTER TABLE users_new RENAME TO users;
+                """
+            )
         if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             user = os.environ.get("PANEL_ADMIN_USER", "admin")
             pw = os.environ.get("PANEL_ADMIN_PASSWORD")
@@ -296,6 +325,13 @@ def admin_user(u=Depends(current_user)) -> sqlite3.Row:
     return u
 
 
+def manager_user(u=Depends(current_user)) -> sqlite3.Row:
+    """Admin or supervisor: may manage customers, technicians and computer assignment."""
+    if u["role"] not in ("admin", "supervisor"):
+        raise HTTPException(403, "Not allowed")
+    return u
+
+
 def hub_auth(x_api_key: str = Header(default="")) -> str:
     """API key for other Exelixisnet systems. Returns which system is calling."""
     for name, key in (("hub", HUB_API_KEY), ("monitor", MONITOR_API_KEY)):
@@ -324,6 +360,9 @@ def device_view(r: sqlite3.Row) -> dict:
         "os_user": r["os_user"],
         "kind": r["kind"],
         "hidden": bool(r["hidden"]),
+        "hidden_sup": bool(r["hidden_sup"]),
+        "ram": r["ram"],
+        "disk": r["disk"],
         "customer_id": r["customer_id"],
         "customer_name": (r["customer_name"] if "customer_name" in r.keys() else None),
     }
@@ -356,6 +395,8 @@ class RegisterIn(BaseModel):
     local_ip: str = Field(default="", max_length=64)
     os_user: str = Field(default="", max_length=120)
     kind: str = Field(default="", max_length=16)
+    ram: str = Field(default="", max_length=32)
+    disk: str = Field(default="", max_length=32)
 
 
 class HeartbeatIn(BaseModel):
@@ -367,6 +408,9 @@ class HeartbeatIn(BaseModel):
     local_ip: str = Field(default="", max_length=64)
     os_user: str = Field(default="", max_length=120)
     kind: str = Field(default="", max_length=16)
+    os: str = Field(default="", max_length=120)
+    ram: str = Field(default="", max_length=32)
+    disk: str = Field(default="", max_length=32)
     # When the ID changes (rare), the app sends its previous ID here.
     old_id: str = Field(default="", max_length=40)
 
@@ -382,16 +426,18 @@ def client_register(body: RegisterIn, request: Request, x_enroll_token: str = He
         existed = c.execute("SELECT 1 FROM devices WHERE rd_id=?", (body.id,)).fetchone()
         c.execute(
             """INSERT INTO devices (rd_id, name, phone, hostname, os, app_version, pw_enc,
-                                    secret_hash, last_ip, local_ip, os_user, kind, created, last_seen)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                    secret_hash, last_ip, local_ip, os_user, kind, ram, disk,
+                                    created, last_seen)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(rd_id) DO UPDATE SET name=excluded.name, phone=excluded.phone,
                  hostname=excluded.hostname, os=excluded.os, app_version=excluded.app_version,
                  pw_enc=excluded.pw_enc, secret_hash=excluded.secret_hash,
                  last_ip=excluded.last_ip, local_ip=excluded.local_ip, os_user=excluded.os_user,
-                 kind=excluded.kind, last_seen=excluded.last_seen""",
+                 kind=excluded.kind, ram=excluded.ram, disk=excluded.disk,
+                 last_seen=excluded.last_seen""",
             (body.id, body.name.strip(), body.phone.strip(), body.hostname, body.os,
              body.version, enc(body.password), sha256(secret), ip, body.local_ip,
-             body.os_user, body.kind, now, now),
+             body.os_user, body.kind, body.ram, body.disk, now, now),
         )
     audit("client", "re-register" if existed else "register", body.id, f"{body.name} from {ip}")
     return {"secret": secret}
@@ -415,6 +461,12 @@ def client_heartbeat(body: HeartbeatIn, request: Request):
             fields["os_user"] = body.os_user
         if body.kind:
             fields["kind"] = body.kind
+        if body.os:
+            fields["os"] = body.os
+        if body.ram:
+            fields["ram"] = body.ram
+        if body.disk:
+            fields["disk"] = body.disk
         if body.password:
             fields["pw_enc"] = enc(body.password)
         if body.old_id and body.old_id != body.id:
@@ -475,9 +527,18 @@ def me(u=Depends(current_user)):
             "totp": bool(u["totp_secret"]), "panel_version": PANEL_VERSION}
 
 
+def _visible_where(role: str, prefix: str = "") -> str:
+    # admin sees all; supervisor is hidden only from admin-hidden; tech from both.
+    if role == "admin":
+        return ""
+    if role == "supervisor":
+        return f"WHERE {prefix}hidden_sup=0"
+    return f"WHERE {prefix}hidden=0 AND {prefix}hidden_sup=0"
+
+
 @app.get("/api/devices")
 def list_devices(u=Depends(current_user)):
-    where = "" if u["role"] == "admin" else "WHERE d.hidden=0"
+    where = _visible_where(u["role"], "d.")
     with db() as c:
         rows = c.execute(
             f"SELECT d.*, cu.name AS customer_name FROM devices d "
@@ -487,10 +548,18 @@ def list_devices(u=Depends(current_user)):
     return [device_view(r) for r in rows]
 
 
+def _can_see_device(r: sqlite3.Row, role: str) -> bool:
+    if role == "admin":
+        return True
+    if role == "supervisor":
+        return not r["hidden_sup"]
+    return not r["hidden"] and not r["hidden_sup"]
+
+
 def get_visible_device(rd_id: str, u: sqlite3.Row) -> sqlite3.Row:
     r = get_device(rd_id)
-    if r["hidden"] and u["role"] != "admin":
-        raise HTTPException(404, "Unknown device")  # hidden from technicians
+    if not _can_see_device(r, u["role"]):
+        raise HTTPException(404, "Unknown device")
     return r
 
 
@@ -503,7 +572,7 @@ class DeviceCreate(BaseModel):
 
 
 @app.post("/api/devices")
-def device_create(body: DeviceCreate, u=Depends(admin_user)):
+def device_create(body: DeviceCreate, u=Depends(manager_user)):
     rid = body.id.strip()
     now = time.time()
     with db() as c:
@@ -539,21 +608,26 @@ class DeviceEdit(BaseModel):
     phone: Optional[str] = Field(default=None, max_length=40)
     notes: Optional[str] = Field(default=None, max_length=2000)
     hidden: Optional[bool] = None
+    hidden_sup: Optional[bool] = None
     customer_id: Optional[int] = None  # 0 clears the assignment
 
 
 @app.patch("/api/devices/{rd_id}")
 def device_edit(rd_id: str, body: DeviceEdit, u=Depends(current_user)):
-    get_device(rd_id)
+    get_visible_device(rd_id, u)
     fields = {}
     for k in ("name", "phone", "notes"):
         v = getattr(body, k)
         if v is not None:
             fields[k] = v.strip()
     if body.hidden is not None:
-        if u["role"] != "admin":
-            raise HTTPException(403, "Only administrators can hide computers")
+        if u["role"] not in ("admin", "supervisor"):
+            raise HTTPException(403, "Only admins or supervisors can hide computers")
         fields["hidden"] = 1 if body.hidden else 0
+    if body.hidden_sup is not None:
+        if u["role"] != "admin":
+            raise HTTPException(403, "Only administrators can hide computers from supervisors")
+        fields["hidden_sup"] = 1 if body.hidden_sup else 0
     if body.customer_id is not None:
         cid = body.customer_id or None
         if cid is not None:
@@ -614,11 +688,13 @@ class CustomerIn(BaseModel):
 
 
 @app.post("/api/customers")
-def customer_create(body: CustomerIn, u=Depends(admin_user)):
+def customer_create(body: CustomerIn, u=Depends(manager_user)):
+    # Only admins set the rate (money is admin-only); a supervisor's value is ignored.
+    rate = body.rate if u["role"] == "admin" else None
     with db() as c:
         cur = c.execute(
             "INSERT INTO customers (name, contact, rate, notes, created) VALUES (?,?,?,?,?)",
-            (body.name.strip(), body.contact.strip(), body.rate, body.notes.strip(), time.time()),
+            (body.name.strip(), body.contact.strip(), rate, body.notes.strip(), time.time()),
         )
         cid = cur.lastrowid
     audit(u["username"], "customer-create", detail=body.name.strip())
@@ -626,18 +702,23 @@ def customer_create(body: CustomerIn, u=Depends(admin_user)):
 
 
 @app.patch("/api/customers/{cid}")
-def customer_edit(cid: int, body: CustomerIn, u=Depends(admin_user)):
+def customer_edit(cid: int, body: CustomerIn, u=Depends(manager_user)):
     with db() as c:
         if not c.execute("SELECT 1 FROM customers WHERE id=?", (cid,)).fetchone():
             raise HTTPException(404, "Unknown customer")
-        c.execute("UPDATE customers SET name=?, contact=?, rate=?, notes=? WHERE id=?",
-                  (body.name.strip(), body.contact.strip(), body.rate, body.notes.strip(), cid))
+        if u["role"] == "admin":
+            c.execute("UPDATE customers SET name=?, contact=?, rate=?, notes=? WHERE id=?",
+                      (body.name.strip(), body.contact.strip(), body.rate, body.notes.strip(), cid))
+        else:
+            # supervisor: leave the rate untouched
+            c.execute("UPDATE customers SET name=?, contact=?, notes=? WHERE id=?",
+                      (body.name.strip(), body.contact.strip(), body.notes.strip(), cid))
     audit(u["username"], "customer-edit", detail=body.name.strip())
     return {"ok": True}
 
 
 @app.delete("/api/customers/{cid}")
-def customer_delete(cid: int, u=Depends(admin_user)):
+def customer_delete(cid: int, u=Depends(manager_user)):
     with db() as c:
         r = c.execute("SELECT name FROM customers WHERE id=?", (cid,)).fetchone()
         if not r:
@@ -719,16 +800,23 @@ def dashboard(u=Depends(current_user)):
         for row in c.execute("SELECT id, name, rate FROM customers"):
             crates[row["id"]] = row["rate"] if row["rate"] is not None else rate_default
             cnames[row["id"]] = row["name"]
-        devnames = {row["rd_id"]: row["name"] for row in c.execute("SELECT rd_id, name FROM devices")}
-        online_now = sum(1 for row in c.execute("SELECT last_seen FROM devices")
-                         if now - row["last_seen"] < ONLINE_SECONDS)
-        total_computers = c.execute("SELECT COUNT(*) n FROM devices").fetchone()["n"]
+        # Only computers the viewer may see count toward the figures.
+        where = _visible_where(u["role"])
+        devrows = c.execute(f"SELECT rd_id, name, last_seen FROM devices {where}").fetchall()
+        visible = {row["rd_id"] for row in devrows}
+        devnames = {row["rd_id"]: row["name"] for row in devrows}
+        online_now = sum(1 for row in devrows if now - row["last_seen"] < ONLINE_SECONDS)
+        total_computers = len(devrows)
         total_customers = c.execute("SELECT COUNT(*) n FROM customers").fetchone()["n"]
 
-        done = c.execute(
-            "SELECT rd_id, customer_id, started, seconds FROM sessions WHERE ended IS NOT NULL"
-        ).fetchall()
-        open_now = c.execute("SELECT COUNT(*) n FROM sessions WHERE ended IS NULL").fetchone()["n"]
+        done = [
+            s for s in c.execute(
+                "SELECT rd_id, customer_id, started, seconds FROM sessions WHERE ended IS NOT NULL")
+            if s["rd_id"] in visible
+        ]
+        open_now = sum(
+            1 for s in c.execute("SELECT rd_id FROM sessions WHERE ended IS NULL")
+            if s["rd_id"] in visible)
 
     # aggregate in Python (session volumes are small)
     months = {}
@@ -809,7 +897,7 @@ def dashboard(u=Depends(current_user)):
 
 
 @app.get("/api/audit")
-def audit_log(limit: int = 200, u=Depends(admin_user)):
+def audit_log(limit: int = 200, u=Depends(manager_user)):
     with db() as c:
         rows = c.execute(
             "SELECT ts, actor, action, rd_id, detail FROM audit ORDER BY id DESC LIMIT ?",
@@ -823,11 +911,11 @@ class UserIn(BaseModel):
     username: str = Field(min_length=2, max_length=40)
     full_name: str = Field(default="", max_length=80)
     password: str = Field(min_length=10, max_length=128)
-    role: str = Field(default="tech", pattern="^(admin|tech)$")
+    role: str = Field(default="tech", pattern="^(admin|supervisor|tech)$")
 
 
 @app.get("/api/users")
-def users_list(u=Depends(admin_user)):
+def users_list(u=Depends(manager_user)):
     with db() as c:
         rows = c.execute(
             "SELECT id, username, full_name, role, active, totp_secret != '' AS totp FROM users ORDER BY username"
@@ -836,7 +924,10 @@ def users_list(u=Depends(admin_user)):
 
 
 @app.post("/api/users")
-def users_create(body: UserIn, u=Depends(admin_user)):
+def users_create(body: UserIn, u=Depends(manager_user)):
+    # Supervisors may only create technicians; admins create any role.
+    if u["role"] != "admin" and body.role != "tech":
+        raise HTTPException(403, "Supervisors can only add technicians")
     try:
         with db() as c:
             c.execute(
@@ -852,13 +943,23 @@ def users_create(body: UserIn, u=Depends(admin_user)):
 class UserPatch(BaseModel):
     full_name: Optional[str] = Field(default=None, max_length=80)
     password: Optional[str] = Field(default=None, min_length=10, max_length=128)
-    role: Optional[str] = Field(default=None, pattern="^(admin|tech)$")
+    role: Optional[str] = Field(default=None, pattern="^(admin|supervisor|tech)$")
     active: Optional[bool] = None
     reset_2fa: bool = False
 
 
 @app.patch("/api/users/{uid}")
-def users_edit(uid: int, body: UserPatch, u=Depends(admin_user)):
+def users_edit(uid: int, body: UserPatch, u=Depends(manager_user)):
+    with db() as c:
+        target = c.execute("SELECT role FROM users WHERE id=?", (uid,)).fetchone()
+    if not target:
+        raise HTTPException(404, "Unknown user")
+    # Supervisors may only manage technicians, and cannot promote anyone.
+    if u["role"] != "admin":
+        if target["role"] != "tech":
+            raise HTTPException(403, "Supervisors can only manage technicians")
+        if body.role and body.role != "tech":
+            raise HTTPException(403, "Supervisors cannot change roles")
     fields: dict = {}
     if body.full_name is not None:
         fields["full_name"] = body.full_name.strip()

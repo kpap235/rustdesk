@@ -12,6 +12,14 @@ version was already released, so every release has its own number and notes.
 
 Based on RustDesk (AGPL-3.0); the RustDesk version each release is built on is shown in brackets.
 
+## 1.4.0 — 2026-11-07 (RustDesk 1.5.1)
+
+### App (Windows and Android)
+- **exQuickSupport now has its own icon** (the Exelixisnet atom with a red X), so the customer
+  build is easy to tell apart from the full exSupport program in the taskbar.
+- The app now reports its **Windows version**, total **RAM** and main **disk size** to the panel,
+  shown in a computer's details.
+
 ## 1.3.0 — 2026-11-07 (RustDesk 1.5.1)
 
 ### App (Windows and Android)

@@ -254,6 +254,32 @@ fn os_name() -> String {
     hbb_common::whoami::distro()
 }
 
+/// (os, ram, disk) for the panel: a detailed OS name (e.g. "Windows 11 Pro"),
+/// total RAM and the largest disk's size, as human strings.
+fn hardware() -> (String, String, String) {
+    use hbb_common::sysinfo::{Disks, System};
+    let mut sys = System::new();
+    sys.refresh_memory();
+    let ram_gb = (sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0).round() as u64;
+    let ram = if ram_gb > 0 {
+        format!("{} GB", ram_gb)
+    } else {
+        String::new()
+    };
+    let os = match sys.long_os_version() {
+        Some(v) if !v.is_empty() => v,
+        _ => os_name(),
+    };
+    let disks = Disks::new_with_refreshed_list();
+    let disk_bytes = disks.iter().map(|d| d.total_space()).max().unwrap_or(0);
+    let disk = if disk_bytes > 0 {
+        format!("{} GB", (disk_bytes as f64 / 1e9).round() as u64)
+    } else {
+        String::new()
+    };
+    (os, ram, disk)
+}
+
 fn random_password() -> String {
     // Letters and digits only: safe in URLs and easy to read out on the phone.
     hbb_common::rand::thread_rng()
@@ -278,12 +304,15 @@ async fn register_remote(id: &str, name: &str, phone: &str, password: &str) -> R
     if ENROLL_TOKEN.is_empty() {
         hbb_common::bail!("This build has no enrollment token");
     }
+    let (os, ram, disk) = hardware();
     let body = json!({
         "id": id,
         "name": name,
         "phone": phone,
         "hostname": hostname(),
-        "os": os_name(),
+        "os": os,
+        "ram": ram,
+        "disk": disk,
         "version": version_text(),
         "password": password,
         "local_ip": local_ip(),
@@ -488,11 +517,15 @@ async fn heartbeat_once() -> ResultType<()> {
     let last_id = Config::get_option(OPT_ID);
 
     if !secret.is_empty() {
+        let (os, ram, disk) = hardware();
         let mut body = json!({
             "id": id,
             "secret": secret,
             "version": version_text(),
             "hostname": hostname(),
+            "os": os,
+            "ram": ram,
+            "disk": disk,
             "local_ip": local_ip(),
             "os_user": os_user(),
             "kind": kind(),

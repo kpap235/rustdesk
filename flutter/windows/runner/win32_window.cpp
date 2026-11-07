@@ -36,8 +36,28 @@ HICON LoadCustomIcon() {
     return nullptr;
   }
 
-  icon_path = icon_path.substr(0, last_slash + 1);
-  icon_path += L"data\\flutter_assets\\assets\\icon.ico";
+  std::wstring dir = icon_path.substr(0, last_slash + 1);
+
+  // Exelixisnet: QuickSupport uses a distinct icon. Detect it from the exe name
+  // or the RUSTDESK_APPNAME env the portable packer sets.
+  auto to_lower = [](std::wstring s) {
+    for (auto& ch : s) {
+      if (ch >= L'A' && ch <= L'Z') ch = ch - L'A' + L'a';
+    }
+    return s;
+  };
+  bool quick = false;
+  {
+    if (to_lower(exe_path).find(L"quicksupport") != std::wstring::npos) quick = true;
+    wchar_t appname[256];
+    DWORD n = GetEnvironmentVariableW(L"RUSTDESK_APPNAME", appname, 256);
+    if (n > 0 && n < 256) {
+      if (to_lower(std::wstring(appname)).find(L"quick") != std::wstring::npos) quick = true;
+    }
+  }
+
+  icon_path = dir + (quick ? L"data\\flutter_assets\\assets\\icon_quick.ico"
+                           : L"data\\flutter_assets\\assets\\icon.ico");
 
   // Check file attributes - reject if missing, directory, or reparse point (symlink/junction)
   DWORD file_attr = GetFileAttributesW(icon_path.c_str());
