@@ -72,6 +72,20 @@
   .login-form img { width: 240px; max-width: 100%; display: block; margin-bottom: 36px; }
   .login-form h2 { font-size: 26px; margin: 0 0 6px; }
   .login-form .lead { color: var(--muted); margin: 0 0 24px; }
+  .login-brand .cust { position: relative; z-index: 1; margin: 22px 0; }
+  .login-brand .cust h2 { font-size: 16px; margin: 0 0 12px; color: #fff; font-weight: 700; }
+  .dlbtns { display: flex; gap: 12px; flex-wrap: wrap; }
+  .dlbtn { display: inline-flex; align-items: center; gap: 10px; background: rgba(255,255,255,.10); color: #fff;
+           border: 1px solid rgba(255,255,255,.20); border-radius: 12px; padding: 11px 16px; text-decoration: none;
+           font-weight: 600; font-size: 14px; transition: background .15s, border-color .15s; }
+  .dlbtn:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.35); }
+  .dlbtn svg { width: 22px; height: 22px; flex: none; }
+  .dlbtn small { display: block; font-weight: 400; font-size: 11px; color: #B9C8E4; }
+  .login-brand .cust .guide { display: inline-block; margin-top: 14px; color: #9FD0FF; font-size: 13px; text-decoration: none; }
+  .login-brand .cust .guide:hover { text-decoration: underline; }
+  .login-brand .legal { font-size: 11px; color: #92A3C4; line-height: 1.55; margin: 16px 0 0; max-width: 48ch; }
+  .login-brand .legal b { color: #C8D6EE; font-weight: 600; }
+  .login-brand .legal a { color: #9FD0FF; }
 
   .field { display: block; margin-bottom: 14px; }
   .field span { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
@@ -247,6 +261,27 @@
       <img class="mark" src="/static/icon.png" alt="">
       <h1 class="slant">IT Support console</h1>
       <p>Find a customer, see if their computer is online, and connect in one click.</p>
+    </div>
+    <div class="cust">
+      <h2>Χρειάζεστε βοήθεια; · Need support?</h2>
+      <div class="dlbtns">
+        <a class="dlbtn" href="/get/quick">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="4" width="8" height="8" rx="1"/><rect x="13" y="4" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
+          <span>Windows<small>exQuickSupport</small></span>
+        </a>
+        <a class="dlbtn" href="/get/android">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="9" width="14" height="9" rx="2"/><rect x="2.3" y="10" width="2" height="6" rx="1"/><rect x="19.7" y="10" width="2" height="6" rx="1"/><rect x="8" y="17" width="2" height="4" rx="1"/><rect x="14" y="17" width="2" height="4" rx="1"/><path d="M7 8a5 5 0 0 1 10 0H7Z"/><line x1="8.5" y1="3.6" x2="9.8" y2="5.6" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="15.5" y1="3.6" x2="14.2" y2="5.6" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><circle cx="10" cy="6" r=".7" fill="#13213d"/><circle cx="14" cy="6" r=".7" fill="#13213d"/></svg>
+          <span>Android<small>exQuickSupport</small></span>
+        </a>
+      </div>
+      <a class="guide" href="/guide/el" target="_blank" rel="noopener">Οδηγίες εγκατάστασης (PDF)</a>
+      &nbsp;·&nbsp;<a class="guide" href="/guide/en" target="_blank" rel="noopener">Instructions</a>
+      <p class="legal">
+        <b>Κατεβάζοντας και εγκαθιστώντας την εφαρμογή, αποδέχεστε ότι η ExelixisNet μπορεί να συνδέεται και να χειρίζεται τη συσκευή σας για σκοπούς απομακρυσμένης τεχνικής υποστήριξης.</b>
+        By downloading and installing the app you agree that ExelixisNet may connect to and control this device for remote technical support.
+        <br><br>
+        GDPR: Η ExelixisNet επεξεργάζεται το αναγνωριστικό, το όνομα υπολογιστή, τη διεύθυνση IP και τους χρόνους σύνδεσης της συσκευής σας, αποκλειστικά για την παροχή και καταγραφή της υποστήριξης. Τα δεδομένα δεν κοινοποιούνται σε τρίτους και διατηρούνται όσο χρειάζεται. Μπορείτε να ανακαλέσετε τη συγκατάθεση απεγκαθιστώντας την εφαρμογή· για τα δικαιώματά σας: <a href="mailto:info@exelixisnet.gr">info@exelixisnet.gr</a>.
+      </p>
     </div>
     <div class="contact">Exelixisnet · 2615 00 2000 · info@exelixisnet.gr</div>
   </div>

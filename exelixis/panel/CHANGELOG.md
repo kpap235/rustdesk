@@ -3,6 +3,12 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 1.5.0 — 2026-11-07
+- **Sign-in page** now shows customers how to get the app: download buttons (with icons) for
+  **exQuickSupport** on Windows and Android, and links to the setup guide (Greek and English).
+- Added a **consent statement** — by downloading and installing the app the customer agrees to
+  be supported remotely by ExelixisNet — and a short **GDPR notice** about what is processed.
+
 ## 1.4.0 — 2026-11-07
 - Each computer now shows a **Quick / Full** badge, its **local network address** and the
   **signed-in Windows user**, so you can tell machines apart at a glance. Search matches these too.
