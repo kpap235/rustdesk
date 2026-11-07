@@ -39,7 +39,26 @@ ONLINE_SECONDS = int(os.environ.get("PANEL_ONLINE_SECONDS", "180"))
 SESSION_HOURS = int(os.environ.get("PANEL_SESSION_HOURS", "12"))
 COOKIE_SECURE = os.environ.get("PANEL_COOKIE_SECURE", "1") == "1"
 ISSUER = "Exelixisnet IT Support"
-PANEL_VERSION = "1.0.0"  # keep in step with exelixis/VERSION and CHANGELOG.md
+CHANGELOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CHANGELOG.md")
+
+
+def _read_changelog() -> str:
+    try:
+        with open(CHANGELOG_PATH, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _version_from_changelog(text: str) -> str:
+    # The first "## x.y.z" heading is the current version.
+    for line in text.splitlines():
+        if line.startswith("## "):
+            return line[3:].split()[0]
+    return "unknown"
+
+
+PANEL_VERSION = _version_from_changelog(_read_changelog())
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -568,6 +587,11 @@ def hub_edit(rd_id: str, body: DeviceEdit, x_hub_user: str = Header(default="use
 
 
 # --- web page ----------------------------------------------------------------
+@app.get("/api/changelog")
+def changelog(u=Depends(current_user)):
+    return {"version": PANEL_VERSION, "markdown": _read_changelog()}
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "version": PANEL_VERSION}

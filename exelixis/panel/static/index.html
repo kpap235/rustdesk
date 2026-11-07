@@ -194,6 +194,15 @@
   .pwrow { display: flex; gap: 8px; }
   .pwrow input { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
 
+  .changelog { display: grid; gap: 14px; max-width: 760px; }
+  .changelog .release { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); padding: 18px 22px; }
+  .changelog .release.current { border-color: var(--blue); box-shadow: inset 4px 0 0 var(--blue); }
+  .changelog h2 { font-size: 20px; margin: 0; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .changelog h2 small { font-size: 14px; color: var(--muted); font-style: normal; font-weight: 500; }
+  .changelog h3 { font-size: 14px; margin: 14px 0 4px; color: var(--muted); }
+  .changelog ul { margin: 10px 0 0; padding-left: 20px; }
+  .changelog li { margin: 4px 0; }
+  .changelog .intro { color: var(--muted); margin: 0; }
   .toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--surface);
     padding: 11px 18px; border-radius: var(--radius-m); font-weight: 600; font-size: 14px; z-index: 50;
@@ -244,6 +253,7 @@
       <label class="field hidden" id="codeWrap"><span>6-digit code from your authenticator app</span><input id="lc" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
       <button class="btn btn-primary btn-block">Sign in</button>
       <div class="err" id="loginErr" role="alert"></div>
+      <p class="muted" id="loginVer" style="font-size:12px;margin-top:28px"></p>
     </form>
   </div>
 </section>
@@ -260,6 +270,7 @@
       <button data-tab="users" class="admin-only">Technicians</button>
       <button data-tab="audit" class="admin-only">Activity</button>
       <button data-tab="account">My account</button>
+      <button data-tab="news">What's new</button>
     </nav>
     <div class="rail-foot">
       <span>Signed in as</span>
@@ -323,6 +334,12 @@
           <tbody id="auditRows"></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- What's new -->
+    <div id="tab-news" class="hidden">
+      <div class="page-head"><div><h1 class="slant">What's new</h1><p id="newsLead">Every panel version and what changed in it.</p></div></div>
+      <div class="changelog" id="newsBody"></div>
     </div>
 
     <!-- Account -->
@@ -451,7 +468,11 @@ $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }
 
 async function start() {
   try { me = await api('/api/me'); }
-  catch (e) { $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); $('#lu').focus(); return; }
+  catch (e) {
+    $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); $('#lu').focus();
+    fetch('/healthz').then(r => r.json()).then(h => { if (h.version) $('#loginVer').textContent = `Panel version ${h.version}`; }).catch(() => {});
+    return;
+  }
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   $('#whoName').textContent = me.full_name || me.username;
   $('#panelVer').textContent = me.panel_version ? `Panel version ${me.panel_version}` : '';
@@ -464,7 +485,8 @@ async function start() {
 // ---------- sections ----------
 document.querySelectorAll('.rail nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.rail nav button').forEach(x => x.classList.toggle('on', x === b));
-  ['devices', 'account', 'users', 'audit'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  ['devices', 'account', 'users', 'audit', 'news'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  if (b.dataset.tab === 'news') loadNews();
   if (b.dataset.tab === 'users') loadUsers();
   if (b.dataset.tab === 'audit') loadAudit();
   if (b.dataset.tab === 'devices') $('#search').focus();
@@ -607,6 +629,37 @@ $('#userForm').addEventListener('submit', async (e) => {
     $('#userDlg').close(); loadUsers();
   } catch (err) { $('#userErr').textContent = err.message; }
 });
+
+// ---------- what's new ----------
+function inlineMd(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>'); }
+async function loadNews() {
+  const r = await api('/api/changelog');
+  $('#newsLead').textContent = `You are on panel version ${r.version}. Every version and what changed in it:`;
+  const out = []; let cur = null, list = null, first = true;
+  const close = () => { if (list) { cur.push('</ul>'); list = null; } if (cur) { out.push(cur.join('') + '</section>'); cur = null; } };
+  for (const line of (r.markdown || '').split('\n')) {
+    if (line.startsWith('## ')) {
+      close();
+      const [ver, ...rest] = line.slice(3).split(' — ');
+      cur = [`<section class="release${first ? ' current' : ''}"><h2 class="slant">${esc(ver)}<small>${esc(rest.join(' — '))}${first ? ' · current' : ''}</small></h2>`];
+      first = false;
+    } else if (!cur) {
+      continue;  // the file's title and intro are for maintainers
+    } else if (line.startsWith('### ')) {
+      if (list) { cur.push('</ul>'); list = null; }
+      cur.push(`<h3>${inlineMd(line.slice(4))}</h3>`);
+    } else if (line.startsWith('- ')) {
+      if (!list) { cur.push('<ul>'); list = true; }
+      cur.push(`<li>${inlineMd(line.slice(2))}</li>`);
+    } else if (line.startsWith('  ') && list && cur.length) {
+      cur[cur.length - 1] = cur[cur.length - 1].replace(/<\/li>$/, ' ' + inlineMd(line.trim()) + '</li>');
+    } else if (line.trim()) {
+      cur.push(`<p class="intro">${inlineMd(line)}</p>`);
+    }
+  }
+  close();
+  $('#newsBody').innerHTML = out.join('') || '<p class="muted">No change log found.</p>';
+}
 
 // ---------- activity ----------
 const actionNames = {
