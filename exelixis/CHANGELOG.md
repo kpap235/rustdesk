@@ -12,6 +12,13 @@ version was already released, so every release has its own number and notes.
 
 Based on RustDesk (AGPL-3.0); the RustDesk version each release is built on is shown in brackets.
 
+## 1.0.1 — 2026-11-07 (RustDesk 1.5.1)
+
+### App (Windows)
+- Fixed: installation stopped with "Windows cannot find ...\\ExelixisnetITSupport.exe" and
+  "install failed with elevated exit code 9059". The installer package now contains the
+  program as ExelixisnetITSupport.exe, so nothing has to be renamed while installing.
+
 ## 1.0.0 — 2026-11-06 (RustDesk 1.5.1)
 
 ### App (Windows and Android)

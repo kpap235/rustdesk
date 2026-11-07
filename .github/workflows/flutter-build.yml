@@ -492,9 +492,13 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
+          # Exelixisnet: package the program as ExelixisnetITSupport.exe, the name the
+          # installer and the Windows service expect for this app.
+          rm -rf ./rustdesk-exelixis && cp -r ./rustdesk ./rustdesk-exelixis
+          mv ./rustdesk-exelixis/rustdesk.exe ./rustdesk-exelixis/ExelixisnetITSupport.exe
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          python3 ./generate.py -f ../../rustdesk-exelixis/ -o . -e ../../rustdesk-exelixis/ExelixisnetITSupport.exe
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
