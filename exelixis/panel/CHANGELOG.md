@@ -3,6 +3,15 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 1.6.0 — 2026-11-07
+- **Hide computers from technicians:** in a computer's details an administrator can tick
+  "Hide this computer from technicians". Hidden computers (and their passwords) are visible and
+  connectable only to administrators; they carry a **Hidden** badge in the admin's list.
+- **Add a computer by hand:** a new **+ Add computer** button (admins) lets you register a
+  machine that didn't enrol itself — a plain RustDesk, a server, or one set up manually — by its
+  ID and password. The dialog explains where to find the ID and how to set a permanent password.
+  Such entries show a **Manual** badge.
+
 ## 1.5.0 — 2026-11-07
 - **Sign-in page** now shows customers how to get the app: download buttons (with icons) for
   **exQuickSupport** on Windows and Android, and links to the setup guide (Greek and English).

@@ -134,6 +134,9 @@ def init_db() -> None:
         for col in ("local_ip", "os_user", "kind"):
             if col not in have:
                 c.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+        # Computers an administrator has hidden from technician accounts.
+        if "hidden" not in have:
+            c.execute("ALTER TABLE devices ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
         if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             user = os.environ.get("PANEL_ADMIN_USER", "admin")
             pw = os.environ.get("PANEL_ADMIN_PASSWORD")
@@ -271,6 +274,7 @@ def device_view(r: sqlite3.Row) -> dict:
         "local_ip": r["local_ip"],
         "os_user": r["os_user"],
         "kind": r["kind"],
+        "hidden": bool(r["hidden"]),
     }
 
 
@@ -422,21 +426,55 @@ def me(u=Depends(current_user)):
 
 @app.get("/api/devices")
 def list_devices(u=Depends(current_user)):
+    where = "" if u["role"] == "admin" else "WHERE hidden=0"
     with db() as c:
-        rows = c.execute("SELECT * FROM devices ORDER BY name COLLATE NOCASE").fetchall()
+        rows = c.execute(f"SELECT * FROM devices {where} ORDER BY name COLLATE NOCASE").fetchall()
     return [device_view(r) for r in rows]
+
+
+def get_visible_device(rd_id: str, u: sqlite3.Row) -> sqlite3.Row:
+    r = get_device(rd_id)
+    if r["hidden"] and u["role"] != "admin":
+        raise HTTPException(404, "Unknown device")  # hidden from technicians
+    return r
+
+
+class DeviceCreate(BaseModel):
+    id: str = Field(min_length=3, max_length=40)
+    name: str = Field(min_length=1, max_length=120)
+    phone: str = Field(default="", max_length=40)
+    password: str = Field(default="", max_length=128)
+    notes: str = Field(default="", max_length=2000)
+
+
+@app.post("/api/devices")
+def device_create(body: DeviceCreate, u=Depends(admin_user)):
+    rid = body.id.strip()
+    now = time.time()
+    with db() as c:
+        if c.execute("SELECT 1 FROM devices WHERE rd_id=?", (rid,)).fetchone():
+            raise HTTPException(409, "A computer with this ID is already on the list")
+        c.execute(
+            """INSERT INTO devices (rd_id, name, phone, notes, hostname, os, app_version, pw_enc,
+                                    secret_hash, last_ip, local_ip, os_user, kind, created, last_seen)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (rid, body.name.strip(), body.phone.strip(), body.notes.strip(), "", "", "",
+             enc(body.password), sha256(secrets.token_urlsafe(32)), "", "", "", "manual", now, now),
+        )
+    audit(u["username"], "manual-add", rid, body.name.strip())
+    return {"ok": True}
 
 
 @app.post("/api/devices/{rd_id}/connect")
 def device_connect(rd_id: str, u=Depends(current_user)):
-    r = get_device(rd_id)
+    r = get_visible_device(rd_id, u)
     audit(u["username"], "connect", rd_id, r["name"])
     return {"link": connect_link(rd_id, dec(r["pw_enc"]))}
 
 
 @app.post("/api/devices/{rd_id}/reveal")
 def device_reveal(rd_id: str, u=Depends(current_user)):
-    r = get_device(rd_id)
+    r = get_visible_device(rd_id, u)
     audit(u["username"], "reveal-password", rd_id, r["name"])
     return {"password": dec(r["pw_enc"])}
 
@@ -445,12 +483,21 @@ class DeviceEdit(BaseModel):
     name: Optional[str] = Field(default=None, max_length=120)
     phone: Optional[str] = Field(default=None, max_length=40)
     notes: Optional[str] = Field(default=None, max_length=2000)
+    hidden: Optional[bool] = None
 
 
 @app.patch("/api/devices/{rd_id}")
 def device_edit(rd_id: str, body: DeviceEdit, u=Depends(current_user)):
     get_device(rd_id)
-    fields = {k: v.strip() for k, v in body.model_dump().items() if v is not None}
+    fields = {}
+    for k in ("name", "phone", "notes"):
+        v = getattr(body, k)
+        if v is not None:
+            fields[k] = v.strip()
+    if body.hidden is not None:
+        if u["role"] != "admin":
+            raise HTTPException(403, "Only administrators can hide computers")
+        fields["hidden"] = 1 if body.hidden else 0
     if fields:
         sets = ", ".join(f"{k}=?" for k in fields)
         with db() as c:
