@@ -3223,3 +3223,9 @@ pub fn exelixis_version() -> SyncReturn<String> {
 pub fn exelixis_check_update() -> String {
     crate::exelixis::check_update()
 }
+
+/// Customer "Call for help": raises a support request on the panel. Returns an
+/// empty string on success, otherwise a message to show the customer.
+pub fn exelixis_call_for_help(message: String) -> String {
+    crate::exelixis::call_for_help(message)
+}

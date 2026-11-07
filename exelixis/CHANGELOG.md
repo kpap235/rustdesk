@@ -12,6 +12,13 @@ version was already released, so every release has its own number and notes.
 
 Based on RustDesk (AGPL-3.0); the RustDesk version each release is built on is shown in brackets.
 
+## 1.5.0 — 2026-11-08 (RustDesk 1.5.1)
+
+### App (Windows and Android)
+- **Call for help:** exQuickSupport now has a red "Κλήση για βοήθεια · Call for help" button. The
+  customer taps it (with an optional note) and the request appears instantly on the support panel
+  for a technician to pick up and connect — no phone call or code needed.
+
 ## 1.4.0 — 2026-11-07 (RustDesk 1.5.1)
 
 ### App (Windows and Android)

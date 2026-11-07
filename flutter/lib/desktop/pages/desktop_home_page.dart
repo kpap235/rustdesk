@@ -26,6 +26,7 @@ import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
 import '../widgets/exelixis_register.dart';
 import 'package:flutter_hbb/common/widgets/exelixis_update.dart';
+import 'package:flutter_hbb/common/widgets/exelixis_help.dart';
 
 class DesktopHomePage extends StatefulWidget {
   const DesktopHomePage({Key? key}) : super(key: key);
@@ -95,6 +96,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         alignment: Alignment.center,
         child: exelixisSupportContact(context),
       ),
+      if (isIncomingOnly)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+          child: exelixisHelpButton(context, wide: true),
+        ),
       if (isIncomingOnly)
         Align(
           alignment: Alignment.center,

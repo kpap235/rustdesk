@@ -213,6 +213,30 @@ fn is_newer(latest: &str, current: &str) -> bool {
     }
 }
 
+/// The customer pressed "Call for help": raise a support request on the panel.
+/// Returns an empty string on success, otherwise a message to show.
+pub fn call_for_help(message: String) -> String {
+    match call_for_help_blocking(message.trim()) {
+        Ok(()) => String::new(),
+        Err(e) => format!("{e}"),
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn call_for_help_blocking(message: &str) -> ResultType<()> {
+    let id = Config::get_id();
+    let secret = Config::get_option(OPT_SECRET);
+    if id.is_empty() || secret.is_empty() {
+        hbb_common::bail!("This computer is not registered with support yet.");
+    }
+    let body = json!({ "id": id, "secret": secret, "message": message });
+    let (status, text) = post("/api/client/request", body, false).await?;
+    if status != 200 {
+        hbb_common::bail!("Support server answered {}: {}", status, text);
+    }
+    Ok(())
+}
+
 /// Checks the panel for a newer app version. Returns a JSON string
 /// `{"version":"x","url":"y"}` when an update is available, otherwise empty.
 /// Does a blocking network call, so call it off the UI thread.

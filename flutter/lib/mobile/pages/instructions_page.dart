@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../common.dart';
+import '../../common/widgets/exelixis_help.dart';
 import '../../consts.dart';
 import '../../models/server_model.dart';
 import 'home_page.dart';
@@ -126,6 +127,8 @@ class _InstructionsPageState extends State<InstructionsPage>
             ),
           ]),
           const SizedBox(height: 14),
+          exelixisHelpButton(context, wide: true),
+          const SizedBox(height: 16),
           _intro(hint),
           const SizedBox(height: 18),
           Text('Βήματα · Checklist',

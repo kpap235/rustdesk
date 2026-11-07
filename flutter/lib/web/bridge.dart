@@ -2106,4 +2106,7 @@ class RustdeskImpl {
       Future.value('Not supported on web');
 
   Future<String> exelixisCheckUpdate({dynamic hint}) => Future.value('');
+
+  Future<String> exelixisCallForHelp({required String message, dynamic hint}) =>
+      Future.value('Not supported on web');
 }
