@@ -64,6 +64,9 @@
     justify-content: space-between; position: relative; overflow: hidden;
   }
   .login-brand .mark { width: 64px; height: 64px; border-radius: 14px; display: block; margin-bottom: 28px; box-shadow: 0 0 0 4px rgba(255,255,255,.08); }
+  .login-brand .brandline { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+  .login-brand .brandline .mark { margin-bottom: 0; }
+  .login-brand .brandname { font-size: 26px; font-weight: 800; color: #fff; letter-spacing: .3px; }
   .login-brand h1 { font-size: clamp(34px, 4vw, 52px); line-height: 1.02; margin: 0; max-width: 9ch; }
   .login-brand p { color: #B9C8E4; max-width: 34ch; margin: 18px 0 0; }
   .login-brand .contact { color: #B9C8E4; font-size: 14px; position: relative; z-index: 1; }
@@ -258,7 +261,7 @@
 <section id="login" class="hidden">
   <div class="login-brand">
     <div>
-      <img class="mark" src="/static/icon.png" alt="">
+      <div class="brandline"><img class="mark" src="/static/icon.png" alt=""><span class="brandname">Exelixisnet</span></div>
       <h1 class="slant">IT Support console</h1>
       <p>Find a customer, see if their computer is online, and connect in one click.</p>
     </div>
