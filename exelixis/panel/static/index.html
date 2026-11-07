@@ -364,6 +364,14 @@
             <a class="btn btn-quiet" id="dlAndOpen" target="_blank" rel="noopener">Download</a>
           </div>
         </div>
+        <div class="panel dl">
+          <h2>Short links and setup guide</h2>
+          <p class="lead">Send these to customers. They always lead to the links above, so they never change when a new version comes out.</p>
+          <div class="dl-row"><input id="slWin" readonly aria-label="Short Windows link"><button class="btn btn-quiet" data-copy="slWin">Copy</button></div>
+          <div class="dl-row" style="margin-top:8px"><input id="slAnd" readonly aria-label="Short Android link"><button class="btn btn-quiet" data-copy="slAnd">Copy</button></div>
+          <div class="dl-row" style="margin-top:8px"><input id="slGuideEl" readonly aria-label="Greek setup guide link"><button class="btn btn-quiet" data-copy="slGuideEl">Copy</button><a class="btn btn-quiet" href="/guide/el" target="_blank" rel="noopener">Open guide (Ελληνικά)</a></div>
+          <div class="dl-row" style="margin-top:8px"><input id="slGuideEn" readonly aria-label="English setup guide link"><button class="btn btn-quiet" data-copy="slGuideEn">Copy</button><a class="btn btn-quiet" href="/guide/en" target="_blank" rel="noopener">Open guide (English)</a></div>
+        </div>
         <div class="admin-only" id="dlAdmin">
           <button class="btn btn-quiet" id="dlEdit">Change links</button>
           <button class="btn btn-primary hidden" id="dlSave">Save links</button>
@@ -679,7 +687,12 @@ function showDownloads(editing) {
   $('#dlErr').textContent = '';
   if (editing) $('#dlWin').focus();
 }
-async function loadDownloads() { downloads = await api('/api/downloads'); showDownloads(false); }
+async function loadDownloads() {
+  downloads = await api('/api/downloads'); showDownloads(false);
+  const base = location.origin;
+  $('#slWin').value = base + '/get/windows'; $('#slAnd').value = base + '/get/android';
+  $('#slGuideEl').value = base + '/guide/el'; $('#slGuideEn').value = base + '/guide/en';
+}
 document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
   const v = $('#' + b.dataset.copy).value;
   if (!v) return toast('No link set yet');

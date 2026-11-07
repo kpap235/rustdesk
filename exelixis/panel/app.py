@@ -23,7 +23,7 @@ import qrcode
 import qrcode.image.svg
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -596,6 +596,29 @@ def downloads_save(body: DownloadsIn, u=Depends(admin_user)):
             c.execute("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
     audit(u["username"], "downloads-edit", detail=json.dumps(values))
     return get_downloads()
+
+
+# Public short links for customers: they never change, the panel redirects to
+# whatever link an administrator saved on the Downloads page.
+@app.get("/get/{platform}")
+def get_app(platform: str):
+    links = get_downloads()
+    if platform not in links or not links[platform]:
+        raise HTTPException(404, "Unknown download")
+    return RedirectResponse(links[platform], status_code=302)
+
+
+@app.get("/guide")
+@app.get("/guide/{lang}")
+def guide(lang: str = "el"):
+    if lang not in ("el", "en"):
+        raise HTTPException(404, "Unknown guide")
+    path = os.path.join(STATIC_DIR, f"guide-{lang}.pdf")
+    if not os.path.exists(path):
+        raise HTTPException(404, "Guide not available")
+    return FileResponse(path, media_type="application/pdf",
+                        filename=f"Exelixisnet-IT-Support-{'odigos' if lang == 'el' else 'guide'}.pdf",
+                        content_disposition_type="inline")
 
 
 # --- ExelixisHub API (API key) ----------------------------------------------

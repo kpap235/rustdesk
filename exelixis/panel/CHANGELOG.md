@@ -3,6 +3,11 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 1.3.0 — 2026-11-07
+- Short links for customers that never change: `/get/windows`, `/get/android` (they lead to the
+  links set on the Downloads page) and the setup guide `/guide/el`, `/guide/en`.
+- Illustrated setup guide (PDF, Greek and English) for Windows and Android, with QR codes.
+
 ## 1.2.0 — 2026-11-07
 - New **Downloads** page with the links to the Windows and Android app, ready to copy and send
   to customers. Administrators can change the links when a new version is released.
