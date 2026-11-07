@@ -149,6 +149,17 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_sessions_rd ON sessions(rd_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started);
+            CREATE TABLE IF NOT EXISTS requests (
+                id INTEGER PRIMARY KEY,
+                rd_id TEXT NOT NULL,
+                customer_id INTEGER,
+                message TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open',   -- open | claimed | closed
+                claimed_by TEXT NOT NULL DEFAULT '',
+                created REAL NOT NULL,
+                updated REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
             """
         )
         # Columns added after 1.0: local network address, the signed-in Windows
@@ -170,6 +181,10 @@ def init_db() -> None:
         for col in ("ram", "disk"):
             if col not in have:
                 c.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+        # Whether a session counts toward billing (technician can exclude one).
+        shave = {row["name"] for row in c.execute("PRAGMA table_info(sessions)")}
+        if "billable" not in shave:
+            c.execute("ALTER TABLE sessions ADD COLUMN billable INTEGER NOT NULL DEFAULT 1")
         # Allow the 'supervisor' role on an older users table whose CHECK predates it.
         urow = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
         if urow and "supervisor" not in (urow["sql"] or ""):
@@ -536,16 +551,39 @@ def _visible_where(role: str, prefix: str = "") -> str:
     return f"WHERE {prefix}hidden=0 AND {prefix}hidden_sup=0"
 
 
+def _ver_tuple(v: str):
+    try:
+        return tuple(int(x) for x in v.strip().split(".")[:3])
+    except (ValueError, AttributeError):
+        return ()
+
+
+def _is_older(a: str, b: str) -> bool:
+    ta, tb = _ver_tuple(a), _ver_tuple(b)
+    return bool(ta) and bool(tb) and ta < tb
+
+
 @app.get("/api/devices")
 def list_devices(u=Depends(current_user)):
     where = _visible_where(u["role"], "d.")
+    latest = latest_app_version()
     with db() as c:
         rows = c.execute(
             f"SELECT d.*, cu.name AS customer_name FROM devices d "
             f"LEFT JOIN customers cu ON cu.id = d.customer_id {where} "
             f"ORDER BY d.name COLLATE NOCASE"
         ).fetchall()
-    return [device_view(r) for r in rows]
+        opens = {s["rd_id"]: s["technician"]
+                 for s in c.execute("SELECT rd_id, technician FROM sessions WHERE ended IS NULL")}
+    out = []
+    for r in rows:
+        d = device_view(r)
+        appver = (d.get("app_version") or "").split(" ")[0]
+        d["needs_update"] = _is_older(appver, latest)
+        d["in_session"] = r["rd_id"] in opens
+        d["active_tech"] = opens.get(r["rd_id"], "")
+        out.append(d)
+    return out
 
 
 def _can_see_device(r: sqlite3.Row, role: str) -> bool:
@@ -782,6 +820,85 @@ def client_session(body: SessionIn):
     return {"ok": True}
 
 
+# --- support requests (customer presses "Call for help") --------------------
+class RequestIn(BaseModel):
+    id: str = Field(min_length=3, max_length=40)
+    secret: str = Field(min_length=10, max_length=128)
+    message: str = Field(default="", max_length=500)
+
+
+@app.post("/api/client/request")
+def client_request(body: RequestIn):
+    now = time.time()
+    with db() as c:
+        r = c.execute("SELECT * FROM devices WHERE rd_id=?", (body.id,)).fetchone()
+        if not r or not hmac.compare_digest(r["secret_hash"], sha256(body.secret)):
+            raise HTTPException(401, "Unknown device")
+        existing = c.execute(
+            "SELECT id FROM requests WHERE rd_id=? AND status IN ('open','claimed') "
+            "ORDER BY created DESC LIMIT 1", (body.id,)).fetchone()
+        if existing:
+            c.execute("UPDATE requests SET message=?, status='open', updated=? WHERE id=?",
+                      (body.message.strip(), now, existing["id"]))
+        else:
+            c.execute(
+                "INSERT INTO requests (rd_id, customer_id, message, status, created, updated) "
+                "VALUES (?,?,?,'open',?,?)",
+                (body.id, r["customer_id"], body.message.strip(), now, now))
+    audit("client", "help-request", body.id, body.message.strip()[:120])
+    return {"ok": True}
+
+
+@app.get("/api/requests")
+def requests_list(u=Depends(current_user)):
+    with db() as c:
+        rows = c.execute(
+            "SELECT rq.*, d.name AS dev_name, d.hidden, d.hidden_sup, d.pw_enc, "
+            "cu.name AS customer_name FROM requests rq "
+            "JOIN devices d ON d.rd_id = rq.rd_id "
+            "LEFT JOIN customers cu ON cu.id = rq.customer_id "
+            "WHERE rq.status IN ('open','claimed') ORDER BY rq.created"
+        ).fetchall()
+    out = []
+    for r in rows:
+        if not _can_see_device(r, u["role"]):
+            continue
+        out.append({
+            "id": r["id"], "rd_id": r["rd_id"], "name": r["dev_name"],
+            "customer_name": r["customer_name"], "message": r["message"],
+            "status": r["status"], "claimed_by": r["claimed_by"],
+            "created": r["created"], "has_password": bool(r["pw_enc"]),
+        })
+    return out
+
+
+def _get_request_device(req_id: int, u: sqlite3.Row) -> sqlite3.Row:
+    with db() as c:
+        r = c.execute(
+            "SELECT rq.*, d.hidden, d.hidden_sup FROM requests rq "
+            "JOIN devices d ON d.rd_id = rq.rd_id WHERE rq.id=?", (req_id,)).fetchone()
+    if not r or not _can_see_device(r, u["role"]):
+        raise HTTPException(404, "Unknown request")
+    return r
+
+
+@app.post("/api/requests/{req_id}/claim")
+def request_claim(req_id: int, u=Depends(current_user)):
+    _get_request_device(req_id, u)
+    with db() as c:
+        c.execute("UPDATE requests SET status='claimed', claimed_by=?, updated=? WHERE id=?",
+                  (u["username"], time.time(), req_id))
+    return {"ok": True}
+
+
+@app.post("/api/requests/{req_id}/close")
+def request_close(req_id: int, u=Depends(current_user)):
+    _get_request_device(req_id, u)
+    with db() as c:
+        c.execute("UPDATE requests SET status='closed', updated=? WHERE id=?", (time.time(), req_id))
+    return {"ok": True}
+
+
 # --- dashboard / statistics -------------------------------------------------
 def _month_key(ts: float) -> str:
     return time.strftime("%Y-%m", time.gmtime(ts))
@@ -811,7 +928,7 @@ def dashboard(u=Depends(current_user)):
 
         done = [
             s for s in c.execute(
-                "SELECT rd_id, customer_id, started, seconds FROM sessions WHERE ended IS NOT NULL")
+                "SELECT rd_id, customer_id, started, seconds, billable FROM sessions WHERE ended IS NOT NULL")
             if s["rd_id"] in visible
         ]
         open_now = sum(
@@ -828,14 +945,15 @@ def dashboard(u=Depends(current_user)):
         secs = s["seconds"] or 0
         cid = s["customer_id"]
         rate = crates.get(cid, rate_default)
+        bsecs = secs if s["billable"] else 0  # only billable time is charged
         months.setdefault(mk, {"seconds": 0, "charge": 0.0, "sessions": 0})
         months[mk]["seconds"] += secs
-        months[mk]["charge"] += secs / 3600 * rate
+        months[mk]["charge"] += bsecs / 3600 * rate
         months[mk]["sessions"] += 1
         if mk == this_month:
             sessions_month += 1
-            pc = per_customer.setdefault(cid, {"seconds": 0, "sessions": 0})
-            pc["seconds"] += secs; pc["sessions"] += 1
+            pc = per_customer.setdefault(cid, {"seconds": 0, "bsecs": 0, "sessions": 0})
+            pc["seconds"] += secs; pc["bsecs"] += bsecs; pc["sessions"] += 1
             pk = per_computer.setdefault(s["rd_id"], {"seconds": 0, "sessions": 0})
             pk["seconds"] += secs; pk["sessions"] += 1
 
@@ -863,7 +981,7 @@ def dashboard(u=Depends(current_user)):
                "name": cnames.get(cid, "Unassigned") if cid else "Unassigned",
                "hours": round(hours, 2), "sessions": d["sessions"]}
         if admin:
-            row["charge"] = round(hours * crates.get(cid, rate_default), 2)
+            row["charge"] = round(d.get("bsecs", 0) / 3600 * crates.get(cid, rate_default), 2)
         customers_out.append(row)
     customers_out.sort(key=lambda x: x["hours"], reverse=True)
 
@@ -894,6 +1012,50 @@ def dashboard(u=Depends(current_user)):
             sum(c["charge"] for c in customers_out), 2)
         out["default_rate"] = rate_default
     return out
+
+
+# --- sessions (time log the technician can annotate) ------------------------
+@app.get("/api/sessions")
+def sessions_list(limit: int = 120, u=Depends(manager_user)):
+    with db() as c:
+        rows = c.execute(
+            "SELECT s.*, d.name AS dev_name, cu.name AS customer_name FROM sessions s "
+            "LEFT JOIN devices d ON d.rd_id = s.rd_id "
+            "LEFT JOIN customers cu ON cu.id = s.customer_id "
+            "WHERE s.ended IS NOT NULL ORDER BY s.started DESC LIMIT ?",
+            (max(1, min(limit, 500)),)).fetchall()
+    admin = u["role"] == "admin"
+    out = []
+    for r in rows:
+        row = {"id": r["id"], "rd_id": r["rd_id"], "name": r["dev_name"] or r["rd_id"],
+               "customer_name": r["customer_name"], "started": r["started"],
+               "seconds": r["seconds"], "technician": r["technician"],
+               "note": r["note"], "billable": bool(r["billable"])}
+        if admin:
+            row["currency"] = currency()
+        out.append(row)
+    return out
+
+
+class SessionEdit(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=1000)
+    billable: Optional[bool] = None
+
+
+@app.patch("/api/sessions/{sid}")
+def session_edit(sid: int, body: SessionEdit, u=Depends(manager_user)):
+    fields: dict = {}
+    if body.note is not None:
+        fields["note"] = body.note.strip()
+    if body.billable is not None:
+        fields["billable"] = 1 if body.billable else 0
+    if fields:
+        with db() as c:
+            if not c.execute("SELECT 1 FROM sessions WHERE id=?", (sid,)).fetchone():
+                raise HTTPException(404, "Unknown session")
+            sets = ", ".join(f"{k}=?" for k in fields)
+            c.execute(f"UPDATE sessions SET {sets} WHERE id=?", (*fields.values(), sid))
+    return {"ok": True}
 
 
 @app.get("/api/audit")

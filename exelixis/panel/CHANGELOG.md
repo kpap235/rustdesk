@@ -3,6 +3,15 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 1.9.0 — 2026-11-08
+- **Support requests ("Call for help"):** when a customer asks for help from the app, it shows as
+  a banner at the top of Computers with Claim / Connect / Done, and a counter on the menu.
+- **Connect by customer:** a "Group by customer" toggle, and search now matches the customer name.
+- **"Needs update" filter** flags computers running an app older than the latest release.
+- **"In session" indicator** shows which computers a technician is connected to right now.
+- **Sessions page:** the full time log — add a note per session and untick one to exclude it from
+  billing (the dashboard then charges only billable time). Visible to supervisors and admins.
+
 ## 1.8.0 — 2026-11-07
 - New **Supervisor** role between Administrator and Technician: supervisors manage technicians and
   customers and can hide computers from technicians, but do not see rates or € amounts (billing

@@ -145,6 +145,10 @@
   .checkrow { display: flex; align-items: flex-start; gap: 10px; margin: 4px 0 16px; cursor: pointer; font-size: 14px; }
   .checkrow input { margin-top: 3px; width: 16px; height: 16px; flex: none; accent-color: var(--red); }
   .checkrow small { color: var(--muted); }
+  .sess-note { width: 100%; min-width: 140px; border: 1px solid var(--line); border-radius: var(--radius-s); padding: 7px 9px; font: inherit; font-size: 13px; background: var(--paper); color: var(--ink); }
+  .sess-note:focus { border-color: var(--blue); outline: none; }
+  .sess-bill { width: 18px; height: 18px; accent-color: var(--red); }
+  #sessTable td { vertical-align: middle; }
   .steps-mini { margin: 0 0 18px; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.6; }
   .steps-mini b { color: var(--ink); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 22px; }
@@ -200,6 +204,20 @@
   .pill.kind-m { background: rgba(93,107,133,.16); color: var(--muted); font-size: 11px; padding: 1px 8px; margin-left: 8px; }
   .pill.kind-h { background: rgba(93,107,133,.16); color: var(--muted); font-size: 11px; padding: 1px 8px; margin-left: 6px; }
   .pill.ver { background: rgba(93,107,133,.12); color: var(--muted); font-size: 11px; padding: 1px 8px; margin-left: 6px; font-weight: 600; }
+  .pill.kind-u { background: rgba(214,138,20,.16); color: #9a6207; font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+  .pill.busy { background: rgba(214,138,20,.16); color: #9a6207; white-space: nowrap; }
+  .grouphdr { list-style: none; padding: 16px 18px 6px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--navy); border-top: 1px solid var(--line); }
+  .grouphdr:first-child { border-top: 0; }
+  .req-banner { display: grid; gap: 10px; margin-bottom: 18px; }
+  .req { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: rgba(214,138,20,.10);
+         border: 1px solid rgba(214,138,20,.35); border-radius: var(--radius-m); padding: 14px 16px; }
+  .req .bell { color: #9a6207; flex: none; }
+  .req .txt { flex: 1 1 240px; min-width: 0; }
+  .req .txt strong { display: block; }
+  .req .txt .sub { color: var(--muted); font-size: 13px; }
+  .req .claimed { color: #9a6207; font-weight: 700; }
+  .req .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .rail nav .badge.req { background: #d68a14; color: #fff; }
   @keyframes pulse { 50% { opacity: .35; } }
   @media (prefers-reduced-motion: reduce) { .pill.live::before { animation: none; } }
   .pc .act { display: flex; gap: 10px; align-items: center; }
@@ -339,8 +357,9 @@
     </div>
     <nav aria-label="Sections">
       <button data-tab="dashboard" class="on">Dashboard</button>
-      <button data-tab="devices">Computers <span class="badge" id="navOnline">0</span></button>
+      <button data-tab="devices">Computers <span class="badge" id="navOnline">0</span><span class="badge req hidden" id="navReq"></span></button>
       <button data-tab="customers">Customers</button>
+      <button data-tab="sessions" class="manager-only">Sessions</button>
       <button data-tab="users" class="manager-only">Technicians</button>
       <button data-tab="audit" class="manager-only">Activity</button>
       <button data-tab="downloads">Downloads</button>
@@ -402,6 +421,18 @@
       <p class="muted" id="custEmpty" style="margin-top:14px">No customers yet.</p>
     </div>
 
+    <!-- Sessions (time log) -->
+    <div id="tab-sessions" class="hidden">
+      <div class="page-head"><div><h1 class="slant">Sessions</h1><p>Every support session, with the time spent. Add a note and untick a session to exclude it from billing.</p></div></div>
+      <div class="table-wrap">
+        <table id="sessTable">
+          <thead><tr><th>When</th><th>Computer</th><th>Customer</th><th>Time</th><th>Technician</th><th>Note</th><th>Billable</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted" id="sessEmpty" style="margin-top:14px">No sessions recorded yet.</p>
+    </div>
+
     <!-- Computers -->
     <div id="tab-devices" class="hidden">
       <div class="page-head">
@@ -411,6 +442,7 @@
         </div>
         <button class="btn btn-primary manager-only" id="addPc">+ Add computer</button>
       </div>
+      <div id="reqBanner" class="req-banner hidden"></div>
       <div class="finder">
         <label class="search">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -420,7 +452,9 @@
           <button data-filter="all" class="on">All</button>
           <button data-filter="online">Online</button>
           <button data-filter="offline">Offline</button>
+          <button data-filter="update">Needs update</button>
         </div>
+        <button class="btn btn-quiet" id="groupToggle" aria-pressed="false">Group by customer</button>
       </div>
       <ul class="roster" id="devRows"></ul>
       <div class="roster empty hidden" id="devEmpty">
@@ -643,7 +677,7 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-let me = null, devices = [], editId = null, editUser = null, filter = 'all', users = [];
+let me = null, devices = [], editId = null, editUser = null, filter = 'all', users = [], groupByCustomer = false;
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -704,19 +738,21 @@ async function start() {
   loadDashboard();
   loadCustomers();
   loadDevices(); setInterval(loadDevices, 30000);
+  loadRequests(); setInterval(loadRequests, 20000);
 }
 
 // ---------- sections ----------
 document.querySelectorAll('.rail nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.rail nav button').forEach(x => x.classList.toggle('on', x === b));
-  ['dashboard', 'devices', 'customers', 'account', 'users', 'audit', 'news', 'downloads'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  ['dashboard', 'devices', 'customers', 'sessions', 'account', 'users', 'audit', 'news', 'downloads'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
   if (b.dataset.tab === 'dashboard') loadDashboard();
   if (b.dataset.tab === 'customers') loadCustomers();
   if (b.dataset.tab === 'news') loadNews();
   if (b.dataset.tab === 'downloads') loadDownloads();
   if (b.dataset.tab === 'users') loadUsers();
   if (b.dataset.tab === 'audit') loadAudit();
-  if (b.dataset.tab === 'devices') $('#search').focus();
+  if (b.dataset.tab === 'devices') { $('#search').focus(); loadRequests(); }
+  if (b.dataset.tab === 'sessions') loadSessions();
 });
 
 // ---------- customers ----------
@@ -724,30 +760,21 @@ async function loadDevices() {
   try { devices = await api('/api/devices'); } catch (e) { if (e.status === 401) location.reload(); return; }
   renderDevices();
 }
-function renderDevices() {
-  const q = $('#search').value.trim().toLowerCase();
-  const rows = devices.filter(d =>
-    (filter === 'all' || (filter === 'online') === d.online) &&
-    (!q || [d.name, d.id, d.hostname, d.phone, d.notes, d.local_ip, d.os_user].join(' ').toLowerCase().includes(q)));
-  rows.sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name));
-  const on = devices.filter(d => d.online).length;
-  $('#navOnline').textContent = on;
-  $('#stats').textContent = devices.length
-    ? `${on} of ${devices.length} computers online right now`
-    : 'No computers registered yet';
-  $('#devEmpty').classList.toggle('hidden', devices.length > 0);
-  $('#devNoMatch').classList.toggle('hidden', !(devices.length > 0 && rows.length === 0));
-  $('#devRows').classList.toggle('hidden', rows.length === 0);
-  $('#devRows').innerHTML = rows.map(d => {
-    const ver = (d.app_version || '').split(' ')[0];
-    const kindPill = d.kind === 'quick' ? '<span class="pill kind-q">Quick</span>'
-      : d.kind === 'full' ? '<span class="pill kind-f">Full</span>'
-      : d.kind === 'manual' ? '<span class="pill kind-m">Manual</span>' : '';
-    const badges = kindPill
-      + (ver ? `<span class="pill ver">v${esc(ver)}</span>` : '')
-      + (d.hidden ? '<span class="pill kind-h">Hidden</span>' : '')
-      + (d.hidden_sup ? '<span class="pill kind-h">Admin-only</span>' : '');
-    return `<li class="pc ${d.online ? 'live' : ''}">
+function pcRow(d) {
+  const ver = (d.app_version || '').split(' ')[0];
+  const kindPill = d.kind === 'quick' ? '<span class="pill kind-q">Quick</span>'
+    : d.kind === 'full' ? '<span class="pill kind-f">Full</span>'
+    : d.kind === 'manual' ? '<span class="pill kind-m">Manual</span>' : '';
+  const badges = kindPill
+    + (ver ? `<span class="pill ver">v${esc(ver)}</span>` : '')
+    + (d.needs_update ? '<span class="pill kind-u">Update</span>' : '')
+    + (d.hidden ? '<span class="pill kind-h">Hidden</span>' : '')
+    + (d.hidden_sup ? '<span class="pill kind-h">Admin-only</span>' : '');
+  const state = d.in_session
+    ? `<span class="pill busy">In session${d.active_tech ? ' · ' + esc(d.active_tech) : ''}</span>`
+    : d.online ? '<span class="pill live">Online</span>'
+    : `<span class="pill idle">Seen ${ago(d.last_seen)}</span>`;
+  return `<li class="pc ${d.online ? 'live' : ''}">
       <span class="signal" aria-hidden="true"></span>
       <div class="main">
         <div class="nm"><strong>${esc(d.name)}</strong>${badges}</div>
@@ -756,18 +783,84 @@ function renderDevices() {
       </div>
       <div class="cust">${d.customer_name ? `<span class="c">${esc(d.customer_name)}</span>` : ''}${d.phone ? `<span class="p">${esc(d.phone)}</span>` : ''}</div>
       <div class="act">
-        ${d.online ? '<span class="pill live">Online</span>' : `<span class="pill idle">Seen ${ago(d.last_seen)}</span>`}
+        ${state}
         <button class="btn btn-primary" data-connect="${esc(d.id)}" ${d.has_password ? '' : 'title="No password stored: you will be asked for one"'}>Connect</button>
         <button class="btn btn-quiet" data-edit="${esc(d.id)}" aria-label="Details for ${esc(d.name)}">Details</button>
       </div>
     </li>`;
-  }).join('');
+}
+function renderDevices() {
+  const q = $('#search').value.trim().toLowerCase();
+  const rows = devices.filter(d => {
+    const pass = filter === 'all' ? true : filter === 'online' ? d.online
+      : filter === 'offline' ? !d.online : filter === 'update' ? d.needs_update : true;
+    return pass && (!q || [d.name, d.id, d.hostname, d.phone, d.notes, d.local_ip, d.os_user, d.customer_name].join(' ').toLowerCase().includes(q));
+  });
+  const on = devices.filter(d => d.online).length;
+  $('#navOnline').textContent = on;
+  $('#stats').textContent = devices.length
+    ? `${on} of ${devices.length} computers online right now`
+    : 'No computers registered yet';
+  $('#devEmpty').classList.toggle('hidden', devices.length > 0);
+  $('#devNoMatch').classList.toggle('hidden', !(devices.length > 0 && rows.length === 0));
+  $('#devRows').classList.toggle('hidden', rows.length === 0);
+  if (groupByCustomer) {
+    rows.sort((a, b) => (a.customer_name || '~').localeCompare(b.customer_name || '~') || (b.online - a.online) || a.name.localeCompare(b.name));
+    let html = '', last = '\0';
+    for (const d of rows) {
+      const g = d.customer_name || 'Unassigned';
+      if (g !== last) { html += `<li class="grouphdr">${esc(g)}</li>`; last = g; }
+      html += pcRow(d);
+    }
+    $('#devRows').innerHTML = html;
+  } else {
+    rows.sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name));
+    $('#devRows').innerHTML = rows.map(pcRow).join('');
+  }
 }
 $('#search').oninput = renderDevices;
 document.querySelectorAll('.seg button').forEach(b => b.onclick = () => {
   filter = b.dataset.filter;
   document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
   renderDevices();
+});
+$('#groupToggle').onclick = () => {
+  groupByCustomer = !groupByCustomer;
+  $('#groupToggle').setAttribute('aria-pressed', groupByCustomer);
+  $('#groupToggle').classList.toggle('btn-primary', groupByCustomer);
+  renderDevices();
+};
+
+// ---------- support requests (call for help) ----------
+async function loadRequests() {
+  let rq; try { rq = await api('/api/requests'); } catch (e) { return; }
+  $('#reqBanner').classList.toggle('hidden', rq.length === 0);
+  const nb = $('#navReq'); nb.textContent = rq.length; nb.classList.toggle('hidden', rq.length === 0);
+  $('#reqBanner').innerHTML = rq.map(r => `<div class="req">
+      <svg class="bell" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      <div class="txt">
+        <strong>${esc(r.name)}${r.customer_name ? ' · ' + esc(r.customer_name) : ''} needs help</strong>
+        <div class="sub">${r.message ? esc(r.message) + ' · ' : ''}ID ${esc(fmtId(r.rd_id))}${r.claimed_by ? ' · <span class="claimed">with ' + esc(r.claimed_by) + '</span>' : ''}</div>
+      </div>
+      <div class="acts">
+        ${r.status === 'open' ? `<button class="btn btn-quiet" data-reqclaim="${r.id}">Claim</button>` : ''}
+        <button class="btn btn-primary" data-reqconnect="${esc(r.rd_id)}" data-reqid="${r.id}" ${r.has_password ? '' : 'title="No password stored"'}>Connect</button>
+        <button class="btn btn-quiet" data-reqclose="${r.id}">Done</button>
+      </div>
+    </div>`).join('');
+}
+$('#reqBanner').addEventListener('click', async (e) => {
+  const claim = e.target.closest('[data-reqclaim]'), close = e.target.closest('[data-reqclose]'), conn = e.target.closest('[data-reqconnect]');
+  try {
+    if (claim) { await api(`/api/requests/${claim.dataset.reqclaim}/claim`, { method: 'POST' }); loadRequests(); }
+    else if (close) { await api(`/api/requests/${close.dataset.reqclose}/close`, { method: 'POST' }); loadRequests(); }
+    else if (conn) {
+      conn.disabled = true; conn.textContent = 'Opening…';
+      await api(`/api/requests/${conn.dataset.reqid}/claim`, { method: 'POST' }).catch(() => {});
+      const r = await api(`/api/devices/${encodeURIComponent(conn.dataset.reqconnect)}/connect`, { method: 'POST' });
+      window.location.href = r.link; loadRequests();
+    }
+  } catch (err) { toast(err.message); if (conn) { conn.disabled = false; conn.textContent = 'Connect'; } }
 });
 $('#search').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { const first = $('#devRows [data-connect]'); if (first) first.click(); }
@@ -982,6 +1075,39 @@ $('#billSave').onclick = async () => {
   try { await api('/api/billing', { method: 'PUT', body: { default_rate: +$('#billRate').value || 0, currency: $('#billCur').value.trim() || '€' } }); toast('Billing saved'); loadCustomers(); }
   catch (err) { toast(err.message); }
 };
+
+// ---------- sessions (time log) ----------
+function fmtDur(s) { s = +s || 0; const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h}h ${m}m` : `${m}m`; }
+let sessions = [];
+async function loadSessions() {
+  let data; try { data = await api('/api/sessions'); } catch (e) { return; }
+  sessions = data;
+  $('#sessEmpty').classList.toggle('hidden', data.length > 0);
+  $('#sessTable').querySelector('tbody').innerHTML = data.map(s => {
+    const dt = new Date(s.started * 1000);
+    return `<tr>
+      <td class="muted">${dt.toLocaleDateString()} ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+      <td><strong>${esc(s.name)}</strong></td>
+      <td class="muted">${esc(s.customer_name || '—')}</td>
+      <td>${fmtDur(s.seconds)}</td>
+      <td class="muted">${esc(s.technician || '—')}</td>
+      <td><input class="sess-note" data-sid="${s.id}" value="${esc(s.note || '')}" placeholder="Add a note…"></td>
+      <td style="text-align:center"><input type="checkbox" class="sess-bill" data-sid="${s.id}" ${s.billable ? 'checked' : ''}></td>
+    </tr>`;
+  }).join('');
+}
+$('#sessTable').addEventListener('change', async (e) => {
+  const b = e.target.closest('.sess-bill'); if (!b) return;
+  try { await api(`/api/sessions/${b.dataset.sid}`, { method: 'PATCH', body: { billable: b.checked } }); toast('Saved'); loadDashboard(); }
+  catch (err) { toast(err.message); b.checked = !b.checked; }
+});
+$('#sessTable').addEventListener('blur', async (e) => {
+  const n = e.target.closest('.sess-note'); if (!n) return;
+  const s = sessions.find(x => x.id == n.dataset.sid);
+  if (s && (s.note || '') === n.value) return;
+  try { await api(`/api/sessions/${n.dataset.sid}`, { method: 'PATCH', body: { note: n.value } }); if (s) s.note = n.value; }
+  catch (err) { toast(err.message); }
+}, true);
 
 // ---------- downloads ----------
 let downloads = { exsupport: '', quick: '', android: '' };
