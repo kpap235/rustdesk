@@ -198,6 +198,58 @@ fn hostname() -> String {
     hbb_common::whoami::fallible::hostname().unwrap_or_default()
 }
 
+fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+    let mut it = v.trim().split('.');
+    let a = it.next()?.parse().ok()?;
+    let b = it.next().unwrap_or("0").parse().ok()?;
+    let c = it.next().unwrap_or("0").parse().ok()?;
+    Some((a, b, c))
+}
+
+fn is_newer(latest: &str, current: &str) -> bool {
+    match (parse_version(latest), parse_version(current)) {
+        (Some(l), Some(c)) => l > c,
+        _ => false, // unknown / dev build: don't nag
+    }
+}
+
+/// Checks the panel for a newer app version. Returns a JSON string
+/// `{"version":"x","url":"y"}` when an update is available, otherwise empty.
+/// Does a blocking network call, so call it off the UI thread.
+pub fn check_update() -> String {
+    match check_update_blocking() {
+        Ok(Some((version, url))) => json!({"version": version, "url": url}).to_string(),
+        _ => String::new(),
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn check_update_blocking() -> ResultType<Option<(String, String)>> {
+    let (status, text) = post("/api/appversion", json!({}), false).await?;
+    if status != 200 {
+        return Ok(None);
+    }
+    let v: serde_json::Value = serde_json::from_str(&text)?;
+    let latest = v.get("version").and_then(|x| x.as_str()).unwrap_or("");
+    if latest.is_empty() || !is_newer(latest, EXELIXIS_VERSION) {
+        return Ok(None);
+    }
+    let (key, path) = if cfg!(target_os = "android") {
+        ("android", "/get/android")
+    } else if is_quick_support() {
+        ("windows_quick", "/get/quick")
+    } else {
+        ("windows_full", "/get/exsupport")
+    };
+    let url = v
+        .get(key)
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| format!("{}{}", PANEL_URL, path));
+    Ok(Some((latest.to_owned(), url)))
+}
+
 fn os_name() -> String {
     hbb_common::whoami::distro()
 }

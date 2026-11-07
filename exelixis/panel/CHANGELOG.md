@@ -11,8 +11,11 @@ To release a panel change: add a section here, then update the VPS.
   and see how many computers each has. Each computer can be **assigned to a customer** from its
   details, so support time rolls up per customer.
 - **Billing** is admin-only: technicians see hours and stats but not rates or € amounts.
-- Support time is measured automatically from the app (needs app 1.2.0 or newer on the customer's
+- Support time is measured automatically from the app (needs app 1.3.0 or newer on the customer's
   computer); the computer list was renamed **Computers**.
+- New `/api/appversion` endpoint so the apps can check for a newer version and offer to update;
+  the latest version is read from the newest GitHub release (cached), overridable via an
+  `app_version` setting.
 
 ## 1.6.0 — 2026-11-07
 - **Hide computers from technicians:** in a computer's details an administrator can tick

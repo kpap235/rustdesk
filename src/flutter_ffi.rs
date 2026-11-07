@@ -3216,3 +3216,10 @@ pub fn exelixis_register(name: String, phone: String) -> String {
 pub fn exelixis_version() -> SyncReturn<String> {
     SyncReturn(crate::exelixis::version_text())
 }
+
+/// Checks the panel for a newer app version (blocking network call, runs off the
+/// UI thread). Returns `{"version":"x","url":"y"}` when an update is available,
+/// otherwise an empty string.
+pub fn exelixis_check_update() -> String {
+    crate::exelixis::check_update()
+}

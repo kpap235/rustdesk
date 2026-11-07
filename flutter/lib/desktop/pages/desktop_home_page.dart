@@ -25,6 +25,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
 import '../widgets/exelixis_register.dart';
+import 'package:flutter_hbb/common/widgets/exelixis_update.dart';
 
 class DesktopHomePage extends StatefulWidget {
   const DesktopHomePage({Key? key}) : super(key: key);
@@ -709,10 +710,14 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   void initState() {
     super.initState();
-    // Exelixisnet IT Support: ask the customer's name once after installation.
+    // Exelixisnet IT Support: ask the customer's name once after installation,
+    // and offer an app update if the panel has a newer version.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) exelixisMaybeAskName(context);
+      });
+      Future.delayed(const Duration(seconds: 4), () {
+        if (mounted) exelixisMaybeOfferUpdate(context);
       });
     });
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {

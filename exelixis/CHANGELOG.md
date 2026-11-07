@@ -12,13 +12,16 @@ version was already released, so every release has its own number and notes.
 
 Based on RustDesk (AGPL-3.0); the RustDesk version each release is built on is shown in brackets.
 
-## 1.2.0 — 2026-11-07 (RustDesk 1.5.1)
+## 1.3.0 — 2026-11-07 (RustDesk 1.5.1)
 
 ### App (Windows and Android)
 - The app now reports to the support panel when a technician connects and disconnects, so the
   panel can measure how long each support session lasts. This powers the new panel **Dashboard**
   and the per-customer time and billing. Only enrolled QuickSupport computers report; the
   technician build (exSupport) does not. The session password is never sent.
+- **Update check:** on start the app asks the panel for the latest version and, if a newer one
+  exists, shows a prompt (Greek and English) with a one-click **Update** button that opens the
+  right download. Works on Windows (exSupport and exQuickSupport) and Android.
 
 ## 1.1.0 — 2026-11-07 (RustDesk 1.5.1)
 

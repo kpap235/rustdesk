@@ -983,6 +983,44 @@ def get_app(platform: str):
     return RedirectResponse(links[platform], status_code=302)
 
 
+# The latest app version the apps compare against to offer an update. Taken from
+# the newest GitHub release (cached), or a manual "app_version" setting override.
+_APP_VER_CACHE = {"ts": 0.0, "ver": ""}
+
+
+def latest_app_version() -> str:
+    override = get_setting("app_version", "")
+    if override:
+        return override
+    now = time.time()
+    if now - _APP_VER_CACHE["ts"] < 3600 and _APP_VER_CACHE["ver"]:
+        return _APP_VER_CACHE["ver"]
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "https://api.github.com/repos/kpap235/rustdesk/releases/latest",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "exsupport-panel"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            tag = json.load(r).get("tag_name", "")
+        ver = tag.lstrip("v").strip()
+        if ver:
+            _APP_VER_CACHE.update(ts=now, ver=ver)
+        return ver
+    except Exception:
+        return _APP_VER_CACHE["ver"]
+
+
+@app.api_route("/api/appversion", methods=["GET", "POST"])
+def app_version():
+    links = get_downloads()
+    return {
+        "version": latest_app_version(),
+        "windows_quick": links.get("quick", ""),
+        "windows_full": links.get("exsupport", ""),
+        "android": links.get("android", ""),
+    }
+
+
 @app.get("/guide")
 @app.get("/guide/{lang}")
 def guide(lang: str = "el"):
