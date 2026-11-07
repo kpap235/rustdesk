@@ -10,6 +10,9 @@ To release a panel change: add a section here, then update the VPS.
 - Redesigned the **computer row**: name on top, then local IP and WAN IP, then the ID; the
   customer and the app version now show in the row, and Online sits next to Connect.
 - A computer's details now show the reported **Windows version, RAM and disk size** (from app 1.4.0).
+- **Security hardening:** Content-Security-Policy, HSTS (over HTTPS), Permissions-Policy and
+  `Cache-Control: no-store` on the API, on top of the existing strict/secure cookies, login
+  rate-limiting, scrypt passwords and 2FA. The whole panel is confirmed responsive on phones.
 
 ## 1.7.0 — 2026-11-07
 - New **Dashboard** with this month's figures: computers online, sessions in progress, hours

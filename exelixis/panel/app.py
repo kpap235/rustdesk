@@ -1179,12 +1179,31 @@ def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"), headers={"Cache-Control": "no-store"})
 
 
+CSP = (
+    "default-src 'self'; "
+    "img-src 'self' data:; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src https://fonts.gstatic.com; "
+    "script-src 'self' 'unsafe-inline'; "
+    "connect-src 'self'; "
+    "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+)
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Content-Security-Policy"] = CSP
+    resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # Only assert HSTS when we know we are served over HTTPS (production).
+    if COOKIE_SECURE:
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Never let the browser or a proxy cache API responses (device passwords etc.).
+    if request.url.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
