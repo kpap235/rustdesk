@@ -1,0 +1,16 @@
+{
+  "slug": "exelixis",
+  "name": "Exelixisnet IT Support",
+  "id_server": "rustdesk.exelixisnet.gr",
+  "pub_key": "OMTaNaukuebffcMIkLStsdfGx6bP0vgtJ68bRpX7Ec0=",
+  "app_name": "exSupport",
+  "app_uri": "exsupport",
+  "panel_url": "https://rustdesk.exelixisnet.gr",
+  "exe_full": "exSupport",
+  "exe_quick": "exQuickSupport",
+  "phone": "2615 00 2000",
+  "email": "info@exelixisnet.gr",
+  "website": "https://exelixisnet.gr",
+  "color_primary": "#0B4FA3",
+  "color_accent": "#C21F3A"
+}

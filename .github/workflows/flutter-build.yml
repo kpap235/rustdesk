@@ -24,6 +24,27 @@ on:
         # Exelixisnet: our own version (exelixis/VERSION), built into the app
         type: string
         default: ""
+      # Exelixisnet multi-tenant: a reseller's build overrides these so the app
+      # points at their own RustDesk deployment and carries their own name. Empty
+      # = the platform owner's own (Exelixisnet) defaults, so the default build
+      # is unchanged.
+      exelixis-id-server:
+        type: string
+        default: ""
+      exelixis-pub-key:
+        type: string
+        default: ""
+      exelixis-app-name:
+        type: string
+        default: ""
+      exelixis-panel-url:
+        type: string
+        default: ""
+      # The tenant's enrollment token. Passed (masked) instead of the shared
+      # secret when building for another tenant; empty keeps the Exelixisnet secret.
+      exelixis-enroll-token:
+        type: string
+        default: ""
 
 # NOTE: F-Droid builder script 'flutter/build_fdroid.sh' reads environment
 # variables from this workflow!
@@ -33,9 +54,16 @@ on:
 # in this file!
 
 env:
-  # Exelixisnet IT Support: token that lets customer PCs register with the support panel
-  EXELIXIS_ENROLL_TOKEN: "${{ secrets.EXELIXIS_ENROLL_TOKEN }}"
+  # Exelixisnet IT Support: token that lets customer PCs register with the support
+  # panel. A per-tenant build passes its own token as a (masked) input; the default
+  # build uses the shared secret.
+  EXELIXIS_ENROLL_TOKEN: "${{ inputs.exelixis-enroll-token != '' && inputs.exelixis-enroll-token || secrets.EXELIXIS_ENROLL_TOKEN }}"
   EXELIXIS_VERSION: "${{ inputs.exelixis-version }}"
+  # Per-tenant compile settings (empty = Exelixisnet defaults inside apply.py).
+  EXELIXIS_ID_SERVER: "${{ inputs.exelixis-id-server }}"
+  EXELIXIS_PUB_KEY: "${{ inputs.exelixis-pub-key }}"
+  EXELIXIS_APP_NAME: "${{ inputs.exelixis-app-name }}"
+  EXELIXIS_PANEL_URL: "${{ inputs.exelixis-panel-url }}"
   SCITER_RUST_VERSION: "1.75" # https://github.com/rustdesk/rustdesk/discussions/7503, also 1.78 has ABI change which causes our sciter version not working, https://blog.rust-lang.org/2024/03/30/i128-layout-update.html
   RUST_VERSION: "1.75" # sciter failed on m1 with 1.78 because of https://blog.rust-lang.org/2024/03/30/i128-layout-update.html
   MAC_RUST_VERSION: "1.81" # 1.81 is requred for macos, because of https://github.com/yury/cidre requires 1.81

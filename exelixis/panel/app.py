@@ -1,15 +1,22 @@
-"""Exelixisnet IT Support panel.
+"""Exelixisnet IT Support panel — multi-tenant.
 
-Customer PCs running the Exelixisnet IT Support app register here with their
-RustDesk ID, a random permanent password and the customer's name. Technicians
-log in, see who is online and connect with one click. ExelixisHub reads the
-same data through the /api/hub endpoints with an API key.
+Each tenant is a separate support business (brand, RustDesk server, customers,
+technicians and computers). Tenants are fully isolated: a technician only ever
+sees and connects to computers in their own tenant. Customer PCs running a
+tenant's QuickSupport app register here with that tenant's enrollment token;
+technicians sign in under their tenant's branded page at /t/<slug>.
+
+The platform owner (a user with the "superadmin" flag) can create and manage
+tenants from the Platform console. ExelixisHub and the MikroTik monitor read
+the platform owner's own tenant through the /api/hub endpoints with an API key.
 """
 import base64
+import binascii
 import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -31,19 +38,26 @@ from pydantic import BaseModel, Field
 DB_PATH = os.environ.get("PANEL_DB", "/data/panel.db")
 SESSION_SECRET = os.environ["PANEL_SESSION_SECRET"].encode()
 FERNET = Fernet(os.environ["PANEL_FERNET_KEY"].encode())
-ENROLL_TOKEN = os.environ["PANEL_ENROLL_TOKEN"]
+ENROLL_TOKEN = os.environ["PANEL_ENROLL_TOKEN"]          # the default tenant's token
 HUB_API_KEY = os.environ.get("PANEL_HUB_API_KEY", "")
 MONITOR_API_KEY = os.environ.get("PANEL_MONITOR_API_KEY", "")
 APP_URI = os.environ.get("PANEL_APP_URI", "exsupport")
-# 1.1 renamed the technician app to exSupport, so its URI scheme is exsupport://.
-# Map the old value through, so a VPS whose .env still names the old app keeps working.
 if APP_URI == "exelixisnetitsupport":
     APP_URI = "exsupport"
+# The platform owner's own tenant — the one existing data migrates into, and the
+# one the root URL and the Hub API map to.
+DEFAULT_SLUG = os.environ.get("PANEL_DEFAULT_TENANT", "exelixis")
+DEFAULT_NAME = os.environ.get("PANEL_DEFAULT_NAME", "Exelixisnet IT Support")
+DEFAULT_RD_ID_SERVER = os.environ.get("PANEL_RD_ID_SERVER", "rustdesk.exelixisnet.gr")
+DEFAULT_RD_RELAY = os.environ.get("PANEL_RD_RELAY", os.environ.get("PANEL_RD_ID_SERVER", ""))
+DEFAULT_RD_KEY = os.environ.get("PANEL_RD_KEY", "")
 ONLINE_SECONDS = int(os.environ.get("PANEL_ONLINE_SECONDS", "180"))
 SESSION_HOURS = int(os.environ.get("PANEL_SESSION_HOURS", "12"))
 COOKIE_SECURE = os.environ.get("PANEL_COOKIE_SECURE", "1") == "1"
 ISSUER = "Exelixisnet IT Support"
 CHANGELOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CHANGELOG.md")
+
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 
 
 def _read_changelog() -> str:
@@ -55,7 +69,6 @@ def _read_changelog() -> str:
 
 
 def _version_from_changelog(text: str) -> str:
-    # The first "## x.y.z" heading is the current version.
     for line in text.splitlines():
         if line.startswith("## "):
             return line[3:].split()[0]
@@ -63,7 +76,6 @@ def _version_from_changelog(text: str) -> str:
 
 
 PANEL_VERSION = _version_from_changelog(_read_changelog())
-
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 app = FastAPI(title="Exelixisnet IT Support panel", docs_url=None, redoc_url=None)
@@ -77,6 +89,7 @@ def db():
     with _db_lock:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
         try:
             yield conn
             conn.commit()
@@ -84,24 +97,112 @@ def db():
             conn.close()
 
 
+# Stable "latest release" links for the platform owner's own apps.
+_REL = "https://github.com/kpap235/rustdesk/releases/latest/download"
+DEFAULT_DOWNLOADS = {
+    "download_exsupport": f"{_REL}/exSupport.exe",
+    "download_quick": f"{_REL}/exQuickSupport.exe",
+    "download_android": f"{_REL}/exQuickSupport.apk",
+}
+
+
+def _tenants_schema(c) -> None:
+    c.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS tenants (
+            id INTEGER PRIMARY KEY,
+            slug TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            phone TEXT NOT NULL DEFAULT '',
+            email TEXT NOT NULL DEFAULT '',
+            website TEXT NOT NULL DEFAULT '',
+            address TEXT NOT NULL DEFAULT '',
+            hours TEXT NOT NULL DEFAULT '',
+            gdpr_text TEXT NOT NULL DEFAULT '',
+            consent_text TEXT NOT NULL DEFAULT '',
+            id_server TEXT NOT NULL DEFAULT '',
+            relay_server TEXT NOT NULL DEFAULT '',
+            rd_key TEXT NOT NULL DEFAULT '',
+            app_uri TEXT NOT NULL DEFAULT 'exsupport',
+            enroll_token TEXT UNIQUE NOT NULL,
+            default_rate REAL NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT '€',
+            color_primary TEXT NOT NULL DEFAULT '#0B4FA3',
+            color_accent TEXT NOT NULL DEFAULT '#C21F3A',
+            logo BLOB,
+            logo_mime TEXT NOT NULL DEFAULT '',
+            download_exsupport TEXT NOT NULL DEFAULT '',
+            download_quick TEXT NOT NULL DEFAULT '',
+            download_android TEXT NOT NULL DEFAULT '',
+            app_version TEXT NOT NULL DEFAULT '',
+            created REAL NOT NULL
+        );
+        """
+    )
+
+
+def _ensure_default_tenant(c) -> int:
+    row = c.execute("SELECT id FROM tenants WHERE slug=?", (DEFAULT_SLUG,)).fetchone()
+    if row:
+        return row["id"]
+    # Carry forward anything the single-tenant panel kept in settings.
+    def s(key, default=""):
+        r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return r["value"] if r else default
+    try:
+        rate = float(s("default_rate", "0") or 0)
+    except ValueError:
+        rate = 0.0
+    cur = c.execute(
+        """INSERT INTO tenants (slug, name, phone, email, website, id_server, relay_server,
+                                rd_key, app_uri, enroll_token, default_rate, currency,
+                                download_exsupport, download_quick, download_android,
+                                app_version, created)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (DEFAULT_SLUG, DEFAULT_NAME, "2615 00 2000", "info@exelixisnet.gr",
+         "https://exelixisnet.gr", DEFAULT_RD_ID_SERVER, DEFAULT_RD_RELAY or DEFAULT_RD_ID_SERVER,
+         DEFAULT_RD_KEY, APP_URI, ENROLL_TOKEN, rate, s("currency", "€") or "€",
+         s("download_exsupport", DEFAULT_DOWNLOADS["download_exsupport"]),
+         s("download_quick", DEFAULT_DOWNLOADS["download_quick"]),
+         s("download_android", DEFAULT_DOWNLOADS["download_android"]),
+         s("app_version", ""), time.time()),
+    )
+    return cur.lastrowid
+
+
+def _add_col(c, table: str, col: str, decl: str) -> None:
+    have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
+    if col not in have:
+        c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
 def init_db() -> None:
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     with db() as c:
         c.executescript(
             """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
+                tenant_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
                 full_name TEXT NOT NULL DEFAULT '',
                 pw_hash TEXT NOT NULL,
                 role TEXT NOT NULL CHECK (role IN ('admin','supervisor','tech')),
+                superadmin INTEGER NOT NULL DEFAULT 0,
                 totp_secret TEXT NOT NULL DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1,
                 session_gen INTEGER NOT NULL DEFAULT 0,
-                created REAL NOT NULL
+                created REAL NOT NULL,
+                UNIQUE (tenant_id, username)
             );
             CREATE TABLE IF NOT EXISTS devices (
-                rd_id TEXT PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
+                rd_id TEXT NOT NULL,
                 name TEXT NOT NULL,
                 phone TEXT NOT NULL DEFAULT '',
                 notes TEXT NOT NULL DEFAULT '',
@@ -111,15 +212,21 @@ def init_db() -> None:
                 pw_enc TEXT NOT NULL DEFAULT '',
                 secret_hash TEXT NOT NULL,
                 last_ip TEXT NOT NULL DEFAULT '',
+                local_ip TEXT NOT NULL DEFAULT '',
+                os_user TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL DEFAULT '',
+                hidden INTEGER NOT NULL DEFAULT 0,
+                hidden_sup INTEGER NOT NULL DEFAULT 0,
+                customer_id INTEGER,
+                ram TEXT NOT NULL DEFAULT '',
+                disk TEXT NOT NULL DEFAULT '',
                 created REAL NOT NULL,
-                last_seen REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
+                last_seen REAL NOT NULL,
+                PRIMARY KEY (tenant_id, rd_id)
             );
             CREATE TABLE IF NOT EXISTS audit (
                 id INTEGER PRIMARY KEY,
+                tenant_id INTEGER,
                 ts REAL NOT NULL,
                 actor TEXT NOT NULL,
                 action TEXT NOT NULL,
@@ -128,101 +235,175 @@ def init_db() -> None:
             );
             CREATE TABLE IF NOT EXISTS customers (
                 id INTEGER PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
                 contact TEXT NOT NULL DEFAULT '',
-                rate REAL,                          -- NULL = use the global default rate
+                rate REAL,
                 notes TEXT NOT NULL DEFAULT '',
                 created REAL NOT NULL
             );
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
                 rd_id TEXT NOT NULL,
-                customer_id INTEGER,                -- snapshot of the device's customer at session time
+                customer_id INTEGER,
                 session_key TEXT NOT NULL DEFAULT '',
                 started REAL NOT NULL,
-                ended REAL,                         -- NULL while the session is still open
+                ended REAL,
                 seconds INTEGER NOT NULL DEFAULT 0,
-                source TEXT NOT NULL DEFAULT 'app', -- 'app' or 'manual'
+                source TEXT NOT NULL DEFAULT 'app',
                 technician TEXT NOT NULL DEFAULT '',
                 note TEXT NOT NULL DEFAULT '',
+                billable INTEGER NOT NULL DEFAULT 1,
                 created REAL NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_sessions_rd ON sessions(rd_id);
-            CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started);
             CREATE TABLE IF NOT EXISTS requests (
                 id INTEGER PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
                 rd_id TEXT NOT NULL,
                 customer_id INTEGER,
                 message TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'open',   -- open | claimed | closed
+                status TEXT NOT NULL DEFAULT 'open',
                 claimed_by TEXT NOT NULL DEFAULT '',
                 created REAL NOT NULL,
                 updated REAL NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
             """
         )
-        # Columns added after 1.0: local network address, the signed-in Windows
-        # user, and which build (full / quick) each device runs.
-        have = {row["name"] for row in c.execute("PRAGMA table_info(devices)")}
-        for col in ("local_ip", "os_user", "kind"):
-            if col not in have:
-                c.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
-        # Computers an administrator has hidden from technician accounts.
-        if "hidden" not in have:
-            c.execute("ALTER TABLE devices ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
-        # Each computer may belong to a customer (client) for time tracking / billing.
-        if "customer_id" not in have:
-            c.execute("ALTER TABLE devices ADD COLUMN customer_id INTEGER")
-        # Computers an administrator has hidden from supervisors (and so from technicians too).
-        if "hidden_sup" not in have:
-            c.execute("ALTER TABLE devices ADD COLUMN hidden_sup INTEGER NOT NULL DEFAULT 0")
-        # Hardware the app reports: total RAM and the main disk size.
-        for col in ("ram", "disk"):
-            if col not in have:
-                c.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
-        # Whether a session counts toward billing (technician can exclude one).
-        shave = {row["name"] for row in c.execute("PRAGMA table_info(sessions)")}
-        if "billable" not in shave:
-            c.execute("ALTER TABLE sessions ADD COLUMN billable INTEGER NOT NULL DEFAULT 1")
-        # Allow the 'supervisor' role on an older users table whose CHECK predates it.
-        urow = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
-        if urow and "supervisor" not in (urow["sql"] or ""):
-            c.executescript(
-                """
-                CREATE TABLE users_new (
-                    id INTEGER PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    full_name TEXT NOT NULL DEFAULT '',
-                    pw_hash TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK (role IN ('admin','supervisor','tech')),
-                    totp_secret TEXT NOT NULL DEFAULT '',
-                    active INTEGER NOT NULL DEFAULT 1,
-                    session_gen INTEGER NOT NULL DEFAULT 0,
-                    created REAL NOT NULL
-                );
-                INSERT INTO users_new SELECT id, username, full_name, pw_hash, role,
-                    totp_secret, active, session_gen, created FROM users;
-                DROP TABLE users;
-                ALTER TABLE users_new RENAME TO users;
-                """
-            )
+        _tenants_schema(c)
+
+        # --- migrate a single-tenant (<=1.9) database -----------------------
+        existing_tables = {r["name"] for r in c.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        legacy = False
+        if "devices" in existing_tables:
+            dcols = {r["name"] for r in c.execute("PRAGMA table_info(devices)")}
+            legacy = "tenant_id" not in dcols
+        if legacy:
+            tid = _ensure_default_tenant(c)
+            _migrate_v1(c, tid)
+        else:
+            _ensure_default_tenant(c)
+
+        # Make sure late-added columns exist on an already-multitenant DB.
+        _add_col(c, "users", "superadmin", "INTEGER NOT NULL DEFAULT 0")
+        _add_col(c, "tenants", "app_version", "TEXT NOT NULL DEFAULT ''")
+
+        # Indexes last, once every table has its tenant_id column.
+        c.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_devices_secret ON devices(secret_hash);
+            CREATE INDEX IF NOT EXISTS idx_sessions_rd ON sessions(tenant_id, rd_id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started);
+            CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(tenant_id, status);
+            """
+        )
+
+        # Bootstrap the first user (platform owner) on a brand-new database.
         if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
+            tid = c.execute("SELECT id FROM tenants WHERE slug=?", (DEFAULT_SLUG,)).fetchone()["id"]
             user = os.environ.get("PANEL_ADMIN_USER", "admin")
             pw = os.environ.get("PANEL_ADMIN_PASSWORD")
             if not pw:
                 raise SystemExit("Set PANEL_ADMIN_PASSWORD for the first start")
             c.execute(
-                "INSERT INTO users (username, full_name, pw_hash, role, created) VALUES (?,?,?,?,?)",
-                (user, "Administrator", hash_pw(pw), "admin", time.time()),
+                "INSERT INTO users (tenant_id, username, full_name, pw_hash, role, superadmin, created) "
+                "VALUES (?,?,?,?,?,1,?)",
+                (tid, user, "Administrator", hash_pw(pw), "admin", time.time()),
             )
 
 
-def audit(actor: str, action: str, rd_id: str = "", detail: str = "") -> None:
+def _migrate_v1(c, tid: int) -> None:
+    """Fold a single-tenant schema into tenant <tid> and add composite keys."""
+    # devices: rebuild with (tenant_id, rd_id) primary key.
+    c.execute("ALTER TABLE devices RENAME TO devices_old")
+    c.executescript(
+        """
+        CREATE TABLE devices (
+            tenant_id INTEGER NOT NULL,
+            rd_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            phone TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            hostname TEXT NOT NULL DEFAULT '',
+            os TEXT NOT NULL DEFAULT '',
+            app_version TEXT NOT NULL DEFAULT '',
+            pw_enc TEXT NOT NULL DEFAULT '',
+            secret_hash TEXT NOT NULL,
+            last_ip TEXT NOT NULL DEFAULT '',
+            local_ip TEXT NOT NULL DEFAULT '',
+            os_user TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL DEFAULT '',
+            hidden INTEGER NOT NULL DEFAULT 0,
+            hidden_sup INTEGER NOT NULL DEFAULT 0,
+            customer_id INTEGER,
+            ram TEXT NOT NULL DEFAULT '',
+            disk TEXT NOT NULL DEFAULT '',
+            created REAL NOT NULL,
+            last_seen REAL NOT NULL,
+            PRIMARY KEY (tenant_id, rd_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_devices_secret ON devices(secret_hash);
+        """
+    )
+    oldcols = [r["name"] for r in c.execute("PRAGMA table_info(devices_old)")]
+    want = ["rd_id", "name", "phone", "notes", "hostname", "os", "app_version", "pw_enc",
+            "secret_hash", "last_ip", "local_ip", "os_user", "kind", "hidden", "hidden_sup",
+            "customer_id", "ram", "disk", "created", "last_seen"]
+    cols = [col for col in want if col in oldcols]
+    sel = ", ".join(cols)
+    c.execute(
+        f"INSERT INTO devices (tenant_id, {sel}) SELECT ?, {sel} FROM devices_old", (tid,))
+    c.execute("DROP TABLE devices_old")
+
+    # users: rebuild so username is unique per tenant and superadmin exists.
+    c.execute("ALTER TABLE users RENAME TO users_old")
+    c.executescript(
+        """
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            tenant_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            full_name TEXT NOT NULL DEFAULT '',
+            pw_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('admin','supervisor','tech')),
+            superadmin INTEGER NOT NULL DEFAULT 0,
+            totp_secret TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            session_gen INTEGER NOT NULL DEFAULT 0,
+            created REAL NOT NULL,
+            UNIQUE (tenant_id, username)
+        );
+        """
+    )
+    c.execute(
+        "INSERT INTO users (id, tenant_id, username, full_name, pw_hash, role, totp_secret, "
+        "active, session_gen, created) "
+        "SELECT id, ?, username, full_name, pw_hash, role, totp_secret, active, session_gen, "
+        "created FROM users_old", (tid,))
+    c.execute("DROP TABLE users_old")
+    # The lowest-id admin is the platform owner.
+    row = c.execute("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1").fetchone()
+    if row:
+        c.execute("UPDATE users SET superadmin=1 WHERE id=?", (row["id"],))
+
+    # customers / sessions / requests / audit: add tenant_id, backfill.
+    for table in ("customers", "sessions", "requests", "audit"):
+        if table in {r["name"] for r in c.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}:
+            _add_col(c, table, "tenant_id", "INTEGER")
+            if table == "audit":
+                c.execute("UPDATE audit SET tenant_id=? WHERE tenant_id IS NULL", (tid,))
+            else:
+                c.execute(f"UPDATE {table} SET tenant_id=? WHERE tenant_id IS NULL", (tid,))
+
+
+def audit(actor: str, action: str, rd_id: str = "", detail: str = "",
+          tenant_id: Optional[int] = None) -> None:
     with db() as c:
         c.execute(
-            "INSERT INTO audit (ts, actor, action, rd_id, detail) VALUES (?,?,?,?,?)",
-            (time.time(), actor, action, rd_id, detail),
+            "INSERT INTO audit (tenant_id, ts, actor, action, rd_id, detail) VALUES (?,?,?,?,?,?)",
+            (tenant_id, time.time(), actor, action, rd_id, detail),
         )
 
 
@@ -244,29 +425,6 @@ def check_pw(pw: str, stored: str) -> bool:
 
 def sha256(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
-
-
-def get_setting(key: str, default: str = "") -> str:
-    with db() as c:
-        r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-    return r["value"] if r else default
-
-
-def set_setting(key: str, value: str) -> None:
-    with db() as c:
-        c.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
-                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
-
-
-def default_rate() -> float:
-    try:
-        return float(get_setting("default_rate", "0") or 0)
-    except ValueError:
-        return 0.0
-
-
-def currency() -> str:
-    return get_setting("currency", "€")
 
 
 def enc(s: str) -> str:
@@ -321,6 +479,43 @@ def note_fail(key: str) -> None:
     _fails.setdefault(key, []).append(time.time())
 
 
+# --- tenant helpers ----------------------------------------------------------
+def tenant_by_slug(c, slug: str) -> Optional[sqlite3.Row]:
+    return c.execute("SELECT * FROM tenants WHERE slug=?", (slug,)).fetchone()
+
+
+def tenant_by_id(c, tid: int) -> Optional[sqlite3.Row]:
+    return c.execute("SELECT * FROM tenants WHERE id=?", (tid,)).fetchone()
+
+
+def tenant_by_enroll_token(c, token: str) -> Optional[sqlite3.Row]:
+    if not token:
+        return None
+    for t in c.execute("SELECT * FROM tenants WHERE active=1"):
+        if hmac.compare_digest(t["enroll_token"], token):
+            return t
+    return None
+
+
+def tenant_rate(t: sqlite3.Row) -> float:
+    try:
+        return float(t["default_rate"] or 0)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def tenant_currency(t: sqlite3.Row) -> str:
+    return t["currency"] or "€"
+
+
+def tenant_downloads(t: sqlite3.Row) -> dict:
+    return {
+        "exsupport": t["download_exsupport"] or DEFAULT_DOWNLOADS["download_exsupport"],
+        "quick": t["download_quick"] or DEFAULT_DOWNLOADS["download_quick"],
+        "android": t["download_android"] or DEFAULT_DOWNLOADS["download_android"],
+    }
+
+
 # --- auth dependencies -------------------------------------------------------
 def current_user(request: Request) -> sqlite3.Row:
     tok = request.cookies.get("exs_session", "")
@@ -328,8 +523,11 @@ def current_user(request: Request) -> sqlite3.Row:
     if not sess:
         raise HTTPException(401, "Not logged in")
     with db() as c:
-        u = c.execute("SELECT * FROM users WHERE id=? AND active=1", (sess[0],)).fetchone()
-    if not u or u["session_gen"] != sess[1]:
+        u = c.execute(
+            "SELECT u.*, t.slug AS tenant_slug, t.name AS tenant_name, t.active AS tenant_active "
+            "FROM users u JOIN tenants t ON t.id = u.tenant_id "
+            "WHERE u.id=? AND u.active=1", (sess[0],)).fetchone()
+    if not u or u["session_gen"] != sess[1] or not u["tenant_active"]:
         raise HTTPException(401, "Not logged in")
     return u
 
@@ -341,18 +539,27 @@ def admin_user(u=Depends(current_user)) -> sqlite3.Row:
 
 
 def manager_user(u=Depends(current_user)) -> sqlite3.Row:
-    """Admin or supervisor: may manage customers, technicians and computer assignment."""
     if u["role"] not in ("admin", "supervisor"):
         raise HTTPException(403, "Not allowed")
     return u
 
 
+def super_user(u=Depends(current_user)) -> sqlite3.Row:
+    if not u["superadmin"]:
+        raise HTTPException(403, "Platform owner only")
+    return u
+
+
 def hub_auth(x_api_key: str = Header(default="")) -> str:
-    """API key for other Exelixisnet systems. Returns which system is calling."""
     for name, key in (("hub", HUB_API_KEY), ("monitor", MONITOR_API_KEY)):
         if key and hmac.compare_digest(x_api_key, key):
             return name
     raise HTTPException(401, "Bad API key")
+
+
+def hub_tenant_id(c) -> int:
+    r = c.execute("SELECT id FROM tenants WHERE slug=?", (DEFAULT_SLUG,)).fetchone()
+    return r["id"] if r else 0
 
 
 # --- device helpers ----------------------------------------------------------
@@ -383,18 +590,22 @@ def device_view(r: sqlite3.Row) -> dict:
     }
 
 
-def connect_link(rd_id: str, pw: str) -> str:
-    link = f"{APP_URI}://connection/new/{quote(rd_id)}"
+def connect_link(app_uri: str, rd_id: str, pw: str) -> str:
+    link = f"{app_uri or 'exsupport'}://connection/new/{quote(rd_id)}"
     if pw:
         link += "?password=" + quote(pw, safe="")
     return link
 
 
-def get_device(rd_id: str) -> sqlite3.Row:
-    with db() as c:
-        r = c.execute("SELECT * FROM devices WHERE rd_id=?", (rd_id,)).fetchone()
+def get_device(c, tid: int, rd_id: str) -> sqlite3.Row:
+    r = c.execute("SELECT * FROM devices WHERE tenant_id=? AND rd_id=?", (tid, rd_id)).fetchone()
     if not r:
         raise HTTPException(404, "Unknown device")
+    return r
+
+
+def device_by_secret(c, secret: str) -> Optional[sqlite3.Row]:
+    r = c.execute("SELECT * FROM devices WHERE secret_hash=?", (sha256(secret),)).fetchone()
     return r
 
 
@@ -426,45 +637,49 @@ class HeartbeatIn(BaseModel):
     os: str = Field(default="", max_length=120)
     ram: str = Field(default="", max_length=32)
     disk: str = Field(default="", max_length=32)
-    # When the ID changes (rare), the app sends its previous ID here.
     old_id: str = Field(default="", max_length=40)
 
 
 @app.post("/api/client/register")
 def client_register(body: RegisterIn, request: Request, x_enroll_token: str = Header(default="")):
-    if not hmac.compare_digest(x_enroll_token, ENROLL_TOKEN):
-        raise HTTPException(401, "Bad enrollment token")
-    secret = secrets.token_urlsafe(32)
     now = time.time()
     ip = client_ip(request)
+    secret = secrets.token_urlsafe(32)
     with db() as c:
-        existed = c.execute("SELECT 1 FROM devices WHERE rd_id=?", (body.id,)).fetchone()
+        t = tenant_by_enroll_token(c, x_enroll_token)
+        if not t:
+            raise HTTPException(401, "Bad enrollment token")
+        tid = t["id"]
+        existed = c.execute(
+            "SELECT 1 FROM devices WHERE tenant_id=? AND rd_id=?", (tid, body.id)).fetchone()
         c.execute(
-            """INSERT INTO devices (rd_id, name, phone, hostname, os, app_version, pw_enc,
+            """INSERT INTO devices (tenant_id, rd_id, name, phone, hostname, os, app_version, pw_enc,
                                     secret_hash, last_ip, local_ip, os_user, kind, ram, disk,
                                     created, last_seen)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(rd_id) DO UPDATE SET name=excluded.name, phone=excluded.phone,
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(tenant_id, rd_id) DO UPDATE SET name=excluded.name, phone=excluded.phone,
                  hostname=excluded.hostname, os=excluded.os, app_version=excluded.app_version,
                  pw_enc=excluded.pw_enc, secret_hash=excluded.secret_hash,
                  last_ip=excluded.last_ip, local_ip=excluded.local_ip, os_user=excluded.os_user,
                  kind=excluded.kind, ram=excluded.ram, disk=excluded.disk,
                  last_seen=excluded.last_seen""",
-            (body.id, body.name.strip(), body.phone.strip(), body.hostname, body.os,
+            (tid, body.id, body.name.strip(), body.phone.strip(), body.hostname, body.os,
              body.version, enc(body.password), sha256(secret), ip, body.local_ip,
              body.os_user, body.kind, body.ram, body.disk, now, now),
         )
-    audit("client", "re-register" if existed else "register", body.id, f"{body.name} from {ip}")
+    audit("client", "re-register" if existed else "register", body.id,
+          f"{body.name} from {ip}", tenant_id=tid)
     return {"secret": secret}
 
 
 @app.post("/api/client/heartbeat")
 def client_heartbeat(body: HeartbeatIn, request: Request):
-    lookup = body.old_id or body.id
     with db() as c:
-        r = c.execute("SELECT * FROM devices WHERE rd_id=?", (lookup,)).fetchone()
-        if not r or not hmac.compare_digest(r["secret_hash"], sha256(body.secret)):
+        r = device_by_secret(c, body.secret)
+        if not r:
             raise HTTPException(401, "Unknown device")  # app re-registers on 401
+        tid = r["tenant_id"]
+        lookup = r["rd_id"]
         fields = {"last_seen": time.time(), "last_ip": client_ip(request)}
         if body.version:
             fields["app_version"] = body.version
@@ -484,16 +699,19 @@ def client_heartbeat(body: HeartbeatIn, request: Request):
             fields["disk"] = body.disk
         if body.password:
             fields["pw_enc"] = enc(body.password)
-        if body.old_id and body.old_id != body.id:
-            if c.execute("SELECT 1 FROM devices WHERE rd_id=?", (body.id,)).fetchone():
-                c.execute("DELETE FROM devices WHERE rd_id=?", (body.id,))
+        id_changed = bool(body.id and body.id != lookup)
+        if id_changed:
+            if c.execute("SELECT 1 FROM devices WHERE tenant_id=? AND rd_id=?",
+                         (tid, body.id)).fetchone():
+                c.execute("DELETE FROM devices WHERE tenant_id=? AND rd_id=?", (tid, body.id))
             fields["rd_id"] = body.id
         sets = ", ".join(f"{k}=?" for k in fields)
-        c.execute(f"UPDATE devices SET {sets} WHERE rd_id=?", (*fields.values(), lookup))
-    if body.old_id and body.old_id != body.id:
-        audit("client", "id-changed", body.id, f"was {body.old_id}")
+        c.execute(f"UPDATE devices SET {sets} WHERE tenant_id=? AND rd_id=?",
+                  (*fields.values(), tid, lookup))
+    if id_changed:
+        audit("client", "id-changed", body.id, f"was {lookup}", tenant_id=tid)
     if body.password:
-        audit("client", "password-updated", body.id)
+        audit("client", "password-updated", body.id or lookup, tenant_id=tid)
     return {"ok": True}
 
 
@@ -502,17 +720,22 @@ class LoginIn(BaseModel):
     username: str
     password: str
     code: str = ""
+    tenant: str = ""
 
 
 @app.post("/api/login")
 def login(body: LoginIn, request: Request, response: Response):
-    key = f"{client_ip(request)}|{body.username.lower()}"
+    slug = (body.tenant or DEFAULT_SLUG).strip().lower()
+    key = f"{client_ip(request)}|{slug}|{body.username.lower()}"
     if too_many_fails(key):
         raise HTTPException(429, "Too many attempts, try again in 15 minutes")
     with db() as c:
-        u = c.execute(
-            "SELECT * FROM users WHERE username=? AND active=1", (body.username.strip(),)
-        ).fetchone()
+        t = tenant_by_slug(c, slug)
+        u = None
+        if t and t["active"]:
+            u = c.execute(
+                "SELECT * FROM users WHERE tenant_id=? AND username=? AND active=1",
+                (t["id"], body.username.strip())).fetchone()
     if not u or not check_pw(body.password, u["pw_hash"]):
         note_fail(key)
         raise HTTPException(401, "Wrong username or password")
@@ -526,7 +749,7 @@ def login(body: LoginIn, request: Request, response: Response):
         "exs_session", sign_session(u["id"], u["session_gen"]), httponly=True,
         secure=COOKIE_SECURE, samesite="strict", max_age=SESSION_HOURS * 3600,
     )
-    audit(u["username"], "login", detail=client_ip(request))
+    audit(u["username"], "login", detail=client_ip(request), tenant_id=t["id"])
     return {"ok": True}
 
 
@@ -539,16 +762,18 @@ def logout(response: Response):
 @app.get("/api/me")
 def me(u=Depends(current_user)):
     return {"username": u["username"], "full_name": u["full_name"], "role": u["role"],
-            "totp": bool(u["totp_secret"]), "panel_version": PANEL_VERSION}
+            "superadmin": bool(u["superadmin"]), "tenant": u["tenant_slug"],
+            "tenant_name": u["tenant_name"], "totp": bool(u["totp_secret"]),
+            "panel_version": PANEL_VERSION}
 
 
 def _visible_where(role: str, prefix: str = "") -> str:
-    # admin sees all; supervisor is hidden only from admin-hidden; tech from both.
+    # Always tenant-scoped by the caller; this adds the hidden-visibility clause.
     if role == "admin":
         return ""
     if role == "supervisor":
-        return f"WHERE {prefix}hidden_sup=0"
-    return f"WHERE {prefix}hidden=0 AND {prefix}hidden_sup=0"
+        return f"AND {prefix}hidden_sup=0"
+    return f"AND {prefix}hidden=0 AND {prefix}hidden_sup=0"
 
 
 def _ver_tuple(v: str):
@@ -565,16 +790,17 @@ def _is_older(a: str, b: str) -> bool:
 
 @app.get("/api/devices")
 def list_devices(u=Depends(current_user)):
+    tid = u["tenant_id"]
     where = _visible_where(u["role"], "d.")
-    latest = latest_app_version()
     with db() as c:
+        t = tenant_by_id(c, tid)
+        latest = latest_app_version(t)
         rows = c.execute(
             f"SELECT d.*, cu.name AS customer_name FROM devices d "
-            f"LEFT JOIN customers cu ON cu.id = d.customer_id {where} "
-            f"ORDER BY d.name COLLATE NOCASE"
-        ).fetchall()
-        opens = {s["rd_id"]: s["technician"]
-                 for s in c.execute("SELECT rd_id, technician FROM sessions WHERE ended IS NULL")}
+            f"LEFT JOIN customers cu ON cu.id = d.customer_id AND cu.tenant_id = d.tenant_id "
+            f"WHERE d.tenant_id=? {where} ORDER BY d.name COLLATE NOCASE", (tid,)).fetchall()
+        opens = {s["rd_id"]: s["technician"] for s in c.execute(
+            "SELECT rd_id, technician FROM sessions WHERE tenant_id=? AND ended IS NULL", (tid,))}
     out = []
     for r in rows:
         d = device_view(r)
@@ -594,8 +820,8 @@ def _can_see_device(r: sqlite3.Row, role: str) -> bool:
     return not r["hidden"] and not r["hidden_sup"]
 
 
-def get_visible_device(rd_id: str, u: sqlite3.Row) -> sqlite3.Row:
-    r = get_device(rd_id)
+def get_visible_device(c, tid: int, rd_id: str, u: sqlite3.Row) -> sqlite3.Row:
+    r = get_device(c, tid, rd_id)
     if not _can_see_device(r, u["role"]):
         raise HTTPException(404, "Unknown device")
     return r
@@ -611,33 +837,40 @@ class DeviceCreate(BaseModel):
 
 @app.post("/api/devices")
 def device_create(body: DeviceCreate, u=Depends(manager_user)):
+    tid = u["tenant_id"]
     rid = body.id.strip()
     now = time.time()
     with db() as c:
-        if c.execute("SELECT 1 FROM devices WHERE rd_id=?", (rid,)).fetchone():
+        if c.execute("SELECT 1 FROM devices WHERE tenant_id=? AND rd_id=?", (tid, rid)).fetchone():
             raise HTTPException(409, "A computer with this ID is already on the list")
         c.execute(
-            """INSERT INTO devices (rd_id, name, phone, notes, hostname, os, app_version, pw_enc,
-                                    secret_hash, last_ip, local_ip, os_user, kind, created, last_seen)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (rid, body.name.strip(), body.phone.strip(), body.notes.strip(), "", "", "",
+            """INSERT INTO devices (tenant_id, rd_id, name, phone, notes, hostname, os, app_version,
+                                    pw_enc, secret_hash, last_ip, local_ip, os_user, kind,
+                                    created, last_seen)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (tid, rid, body.name.strip(), body.phone.strip(), body.notes.strip(), "", "", "",
              enc(body.password), sha256(secrets.token_urlsafe(32)), "", "", "", "manual", now, now),
         )
-    audit(u["username"], "manual-add", rid, body.name.strip())
+    audit(u["username"], "manual-add", rid, body.name.strip(), tenant_id=tid)
     return {"ok": True}
 
 
 @app.post("/api/devices/{rd_id}/connect")
 def device_connect(rd_id: str, u=Depends(current_user)):
-    r = get_visible_device(rd_id, u)
-    audit(u["username"], "connect", rd_id, r["name"])
-    return {"link": connect_link(rd_id, dec(r["pw_enc"]))}
+    tid = u["tenant_id"]
+    with db() as c:
+        r = get_visible_device(c, tid, rd_id, u)
+        t = tenant_by_id(c, tid)
+    audit(u["username"], "connect", rd_id, r["name"], tenant_id=tid)
+    return {"link": connect_link(t["app_uri"], rd_id, dec(r["pw_enc"]))}
 
 
 @app.post("/api/devices/{rd_id}/reveal")
 def device_reveal(rd_id: str, u=Depends(current_user)):
-    r = get_visible_device(rd_id, u)
-    audit(u["username"], "reveal-password", rd_id, r["name"])
+    tid = u["tenant_id"]
+    with db() as c:
+        r = get_visible_device(c, tid, rd_id, u)
+    audit(u["username"], "reveal-password", rd_id, r["name"], tenant_id=tid)
     return {"password": dec(r["pw_enc"])}
 
 
@@ -647,51 +880,55 @@ class DeviceEdit(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=2000)
     hidden: Optional[bool] = None
     hidden_sup: Optional[bool] = None
-    customer_id: Optional[int] = None  # 0 clears the assignment
+    customer_id: Optional[int] = None
 
 
 @app.patch("/api/devices/{rd_id}")
 def device_edit(rd_id: str, body: DeviceEdit, u=Depends(current_user)):
-    get_visible_device(rd_id, u)
-    fields = {}
-    for k in ("name", "phone", "notes"):
-        v = getattr(body, k)
-        if v is not None:
-            fields[k] = v.strip()
-    if body.hidden is not None:
-        if u["role"] not in ("admin", "supervisor"):
-            raise HTTPException(403, "Only admins or supervisors can hide computers")
-        fields["hidden"] = 1 if body.hidden else 0
-    if body.hidden_sup is not None:
-        if u["role"] != "admin":
-            raise HTTPException(403, "Only administrators can hide computers from supervisors")
-        fields["hidden_sup"] = 1 if body.hidden_sup else 0
-    if body.customer_id is not None:
-        cid = body.customer_id or None
-        if cid is not None:
-            with db() as c:
-                if not c.execute("SELECT 1 FROM customers WHERE id=?", (cid,)).fetchone():
+    tid = u["tenant_id"]
+    with db() as c:
+        get_visible_device(c, tid, rd_id, u)
+        fields = {}
+        for k in ("name", "phone", "notes"):
+            v = getattr(body, k)
+            if v is not None:
+                fields[k] = v.strip()
+        if body.hidden is not None:
+            if u["role"] not in ("admin", "supervisor"):
+                raise HTTPException(403, "Only admins or supervisors can hide computers")
+            fields["hidden"] = 1 if body.hidden else 0
+        if body.hidden_sup is not None:
+            if u["role"] != "admin":
+                raise HTTPException(403, "Only administrators can hide computers from supervisors")
+            fields["hidden_sup"] = 1 if body.hidden_sup else 0
+        if body.customer_id is not None:
+            cid = body.customer_id or None
+            if cid is not None:
+                if not c.execute("SELECT 1 FROM customers WHERE id=? AND tenant_id=?",
+                                 (cid, tid)).fetchone():
                     raise HTTPException(404, "Unknown customer")
-        fields["customer_id"] = cid
+            fields["customer_id"] = cid
+        if fields:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            c.execute(f"UPDATE devices SET {sets} WHERE tenant_id=? AND rd_id=?",
+                      (*fields.values(), tid, rd_id))
     if fields:
-        sets = ", ".join(f"{k}=?" for k in fields)
-        with db() as c:
-            c.execute(f"UPDATE devices SET {sets} WHERE rd_id=?", (*fields.values(), rd_id))
-        audit(u["username"], "edit", rd_id, json.dumps(fields, ensure_ascii=False))
+        audit(u["username"], "edit", rd_id, json.dumps(fields, ensure_ascii=False), tenant_id=tid)
     return {"ok": True}
 
 
 @app.delete("/api/devices/{rd_id}")
 def device_delete(rd_id: str, u=Depends(admin_user)):
-    r = get_device(rd_id)
+    tid = u["tenant_id"]
     with db() as c:
-        c.execute("DELETE FROM devices WHERE rd_id=?", (rd_id,))
-    audit(u["username"], "delete", rd_id, r["name"])
+        r = get_device(c, tid, rd_id)
+        c.execute("DELETE FROM devices WHERE tenant_id=? AND rd_id=?", (tid, rd_id))
+    audit(u["username"], "delete", rd_id, r["name"], tenant_id=tid)
     return {"ok": True}
 
 
 # --- customers (clients that computers belong to) ---------------------------
-def customer_view(r: sqlite3.Row, admin: bool) -> dict:
+def customer_view(r: sqlite3.Row, admin: bool, rate_default: float) -> dict:
     v = {
         "id": r["id"],
         "name": r["name"],
@@ -700,22 +937,26 @@ def customer_view(r: sqlite3.Row, admin: bool) -> dict:
         "computers": r["computers"] if "computers" in r.keys() else 0,
     }
     if admin:
-        v["rate"] = r["rate"]  # None = use the global default
-        v["effective_rate"] = r["rate"] if r["rate"] is not None else default_rate()
+        v["rate"] = r["rate"]
+        v["effective_rate"] = r["rate"] if r["rate"] is not None else rate_default
     return v
 
 
 @app.get("/api/customers")
 def customers_list(u=Depends(current_user)):
+    tid = u["tenant_id"]
     admin = u["role"] == "admin"
     with db() as c:
+        t = tenant_by_id(c, tid)
         rows = c.execute(
-            "SELECT cu.*, (SELECT COUNT(*) FROM devices d WHERE d.customer_id=cu.id) AS computers "
-            "FROM customers cu ORDER BY cu.name COLLATE NOCASE"
-        ).fetchall()
-    return {"default_rate": default_rate() if admin else None,
-            "currency": currency(),
-            "customers": [customer_view(r, admin) for r in rows]}
+            "SELECT cu.*, (SELECT COUNT(*) FROM devices d WHERE d.customer_id=cu.id "
+            "AND d.tenant_id=cu.tenant_id) AS computers "
+            "FROM customers cu WHERE cu.tenant_id=? ORDER BY cu.name COLLATE NOCASE",
+            (tid,)).fetchall()
+    rate_default = tenant_rate(t)
+    return {"default_rate": rate_default if admin else None,
+            "currency": tenant_currency(t),
+            "customers": [customer_view(r, admin, rate_default) for r in rows]}
 
 
 class CustomerIn(BaseModel):
@@ -727,43 +968,48 @@ class CustomerIn(BaseModel):
 
 @app.post("/api/customers")
 def customer_create(body: CustomerIn, u=Depends(manager_user)):
-    # Only admins set the rate (money is admin-only); a supervisor's value is ignored.
+    tid = u["tenant_id"]
     rate = body.rate if u["role"] == "admin" else None
     with db() as c:
         cur = c.execute(
-            "INSERT INTO customers (name, contact, rate, notes, created) VALUES (?,?,?,?,?)",
-            (body.name.strip(), body.contact.strip(), rate, body.notes.strip(), time.time()),
-        )
+            "INSERT INTO customers (tenant_id, name, contact, rate, notes, created) "
+            "VALUES (?,?,?,?,?,?)",
+            (tid, body.name.strip(), body.contact.strip(), rate, body.notes.strip(), time.time()))
         cid = cur.lastrowid
-    audit(u["username"], "customer-create", detail=body.name.strip())
+    audit(u["username"], "customer-create", detail=body.name.strip(), tenant_id=tid)
     return {"id": cid}
 
 
 @app.patch("/api/customers/{cid}")
 def customer_edit(cid: int, body: CustomerIn, u=Depends(manager_user)):
+    tid = u["tenant_id"]
     with db() as c:
-        if not c.execute("SELECT 1 FROM customers WHERE id=?", (cid,)).fetchone():
+        if not c.execute("SELECT 1 FROM customers WHERE id=? AND tenant_id=?",
+                         (cid, tid)).fetchone():
             raise HTTPException(404, "Unknown customer")
         if u["role"] == "admin":
-            c.execute("UPDATE customers SET name=?, contact=?, rate=?, notes=? WHERE id=?",
-                      (body.name.strip(), body.contact.strip(), body.rate, body.notes.strip(), cid))
+            c.execute("UPDATE customers SET name=?, contact=?, rate=?, notes=? "
+                      "WHERE id=? AND tenant_id=?",
+                      (body.name.strip(), body.contact.strip(), body.rate, body.notes.strip(),
+                       cid, tid))
         else:
-            # supervisor: leave the rate untouched
-            c.execute("UPDATE customers SET name=?, contact=?, notes=? WHERE id=?",
-                      (body.name.strip(), body.contact.strip(), body.notes.strip(), cid))
-    audit(u["username"], "customer-edit", detail=body.name.strip())
+            c.execute("UPDATE customers SET name=?, contact=?, notes=? WHERE id=? AND tenant_id=?",
+                      (body.name.strip(), body.contact.strip(), body.notes.strip(), cid, tid))
+    audit(u["username"], "customer-edit", detail=body.name.strip(), tenant_id=tid)
     return {"ok": True}
 
 
 @app.delete("/api/customers/{cid}")
 def customer_delete(cid: int, u=Depends(manager_user)):
+    tid = u["tenant_id"]
     with db() as c:
-        r = c.execute("SELECT name FROM customers WHERE id=?", (cid,)).fetchone()
+        r = c.execute("SELECT name FROM customers WHERE id=? AND tenant_id=?", (cid, tid)).fetchone()
         if not r:
             raise HTTPException(404, "Unknown customer")
-        c.execute("UPDATE devices SET customer_id=NULL WHERE customer_id=?", (cid,))
-        c.execute("DELETE FROM customers WHERE id=?", (cid,))
-    audit(u["username"], "customer-delete", detail=r["name"])
+        c.execute("UPDATE devices SET customer_id=NULL WHERE customer_id=? AND tenant_id=?",
+                  (cid, tid))
+        c.execute("DELETE FROM customers WHERE id=? AND tenant_id=?", (cid, tid))
+    audit(u["username"], "customer-delete", detail=r["name"], tenant_id=tid)
     return {"ok": True}
 
 
@@ -774,9 +1020,11 @@ class BillingIn(BaseModel):
 
 @app.put("/api/billing")
 def billing_save(body: BillingIn, u=Depends(admin_user)):
-    set_setting("default_rate", str(body.default_rate))
-    set_setting("currency", body.currency.strip() or "€")
-    audit(u["username"], "billing-edit", detail=f"{body.default_rate} {body.currency}")
+    tid = u["tenant_id"]
+    with db() as c:
+        c.execute("UPDATE tenants SET default_rate=?, currency=? WHERE id=?",
+                  (body.default_rate, body.currency.strip() or "€", tid))
+    audit(u["username"], "billing-edit", detail=f"{body.default_rate} {body.currency}", tenant_id=tid)
     return {"ok": True}
 
 
@@ -792,28 +1040,30 @@ class SessionIn(BaseModel):
 def client_session(body: SessionIn):
     now = time.time()
     with db() as c:
-        r = c.execute("SELECT * FROM devices WHERE rd_id=?", (body.id,)).fetchone()
-        if not r or not hmac.compare_digest(r["secret_hash"], sha256(body.secret)):
+        r = device_by_secret(c, body.secret)
+        if not r:
             raise HTTPException(401, "Unknown device")
+        tid, rd_id = r["tenant_id"], r["rd_id"]
         if body.event == "start":
             open_row = c.execute(
-                "SELECT id FROM sessions WHERE rd_id=? AND session_key=? AND ended IS NULL",
-                (body.id, body.session_key)).fetchone()
+                "SELECT id FROM sessions WHERE tenant_id=? AND rd_id=? AND session_key=? "
+                "AND ended IS NULL", (tid, rd_id, body.session_key)).fetchone()
             if not open_row:
                 tech = ""
                 a = c.execute(
-                    "SELECT actor FROM audit WHERE rd_id=? AND action='connect' AND ts>=? "
-                    "ORDER BY ts DESC LIMIT 1", (body.id, now - 300)).fetchone()
+                    "SELECT actor FROM audit WHERE tenant_id=? AND rd_id=? AND action='connect' "
+                    "AND ts>=? ORDER BY ts DESC LIMIT 1", (tid, rd_id, now - 300)).fetchone()
                 if a:
                     tech = a["actor"]
                 c.execute(
-                    "INSERT INTO sessions (rd_id, customer_id, session_key, started, source, "
-                    "technician, created) VALUES (?,?,?,?,?,?,?)",
-                    (body.id, r["customer_id"], body.session_key, now, "app", tech, now))
-        else:  # end
+                    "INSERT INTO sessions (tenant_id, rd_id, customer_id, session_key, started, "
+                    "source, technician, created) VALUES (?,?,?,?,?,?,?,?)",
+                    (tid, rd_id, r["customer_id"], body.session_key, now, "app", tech, now))
+        else:
             row = c.execute(
-                "SELECT id, started FROM sessions WHERE rd_id=? AND session_key=? AND ended IS NULL "
-                "ORDER BY started DESC LIMIT 1", (body.id, body.session_key)).fetchone()
+                "SELECT id, started FROM sessions WHERE tenant_id=? AND rd_id=? AND session_key=? "
+                "AND ended IS NULL ORDER BY started DESC LIMIT 1",
+                (tid, rd_id, body.session_key)).fetchone()
             if row:
                 secs = max(0, int(now - row["started"]))
                 c.execute("UPDATE sessions SET ended=?, seconds=? WHERE id=?", (now, secs, row["id"]))
@@ -831,34 +1081,36 @@ class RequestIn(BaseModel):
 def client_request(body: RequestIn):
     now = time.time()
     with db() as c:
-        r = c.execute("SELECT * FROM devices WHERE rd_id=?", (body.id,)).fetchone()
-        if not r or not hmac.compare_digest(r["secret_hash"], sha256(body.secret)):
+        r = device_by_secret(c, body.secret)
+        if not r:
             raise HTTPException(401, "Unknown device")
+        tid, rd_id = r["tenant_id"], r["rd_id"]
         existing = c.execute(
-            "SELECT id FROM requests WHERE rd_id=? AND status IN ('open','claimed') "
-            "ORDER BY created DESC LIMIT 1", (body.id,)).fetchone()
+            "SELECT id FROM requests WHERE tenant_id=? AND rd_id=? AND status IN ('open','claimed') "
+            "ORDER BY created DESC LIMIT 1", (tid, rd_id)).fetchone()
         if existing:
             c.execute("UPDATE requests SET message=?, status='open', updated=? WHERE id=?",
                       (body.message.strip(), now, existing["id"]))
         else:
             c.execute(
-                "INSERT INTO requests (rd_id, customer_id, message, status, created, updated) "
-                "VALUES (?,?,?,'open',?,?)",
-                (body.id, r["customer_id"], body.message.strip(), now, now))
-    audit("client", "help-request", body.id, body.message.strip()[:120])
+                "INSERT INTO requests (tenant_id, rd_id, customer_id, message, status, created, updated) "
+                "VALUES (?,?,?,?,'open',?,?)",
+                (tid, rd_id, r["customer_id"], body.message.strip(), now, now))
+    audit("client", "help-request", rd_id, body.message.strip()[:120], tenant_id=tid)
     return {"ok": True}
 
 
 @app.get("/api/requests")
 def requests_list(u=Depends(current_user)):
+    tid = u["tenant_id"]
     with db() as c:
         rows = c.execute(
             "SELECT rq.*, d.name AS dev_name, d.hidden, d.hidden_sup, d.pw_enc, "
             "cu.name AS customer_name FROM requests rq "
-            "JOIN devices d ON d.rd_id = rq.rd_id "
-            "LEFT JOIN customers cu ON cu.id = rq.customer_id "
-            "WHERE rq.status IN ('open','claimed') ORDER BY rq.created"
-        ).fetchall()
+            "JOIN devices d ON d.rd_id = rq.rd_id AND d.tenant_id = rq.tenant_id "
+            "LEFT JOIN customers cu ON cu.id = rq.customer_id AND cu.tenant_id = rq.tenant_id "
+            "WHERE rq.tenant_id=? AND rq.status IN ('open','claimed') ORDER BY rq.created",
+            (tid,)).fetchall()
     out = []
     for r in rows:
         if not _can_see_device(r, u["role"]):
@@ -872,11 +1124,11 @@ def requests_list(u=Depends(current_user)):
     return out
 
 
-def _get_request_device(req_id: int, u: sqlite3.Row) -> sqlite3.Row:
-    with db() as c:
-        r = c.execute(
-            "SELECT rq.*, d.hidden, d.hidden_sup FROM requests rq "
-            "JOIN devices d ON d.rd_id = rq.rd_id WHERE rq.id=?", (req_id,)).fetchone()
+def _get_request_device(c, tid: int, req_id: int, u: sqlite3.Row) -> sqlite3.Row:
+    r = c.execute(
+        "SELECT rq.*, d.hidden, d.hidden_sup FROM requests rq "
+        "JOIN devices d ON d.rd_id = rq.rd_id AND d.tenant_id = rq.tenant_id "
+        "WHERE rq.id=? AND rq.tenant_id=?", (req_id, tid)).fetchone()
     if not r or not _can_see_device(r, u["role"]):
         raise HTTPException(404, "Unknown request")
     return r
@@ -884,18 +1136,21 @@ def _get_request_device(req_id: int, u: sqlite3.Row) -> sqlite3.Row:
 
 @app.post("/api/requests/{req_id}/claim")
 def request_claim(req_id: int, u=Depends(current_user)):
-    _get_request_device(req_id, u)
+    tid = u["tenant_id"]
     with db() as c:
-        c.execute("UPDATE requests SET status='claimed', claimed_by=?, updated=? WHERE id=?",
-                  (u["username"], time.time(), req_id))
+        _get_request_device(c, tid, req_id, u)
+        c.execute("UPDATE requests SET status='claimed', claimed_by=?, updated=? "
+                  "WHERE id=? AND tenant_id=?", (u["username"], time.time(), req_id, tid))
     return {"ok": True}
 
 
 @app.post("/api/requests/{req_id}/close")
 def request_close(req_id: int, u=Depends(current_user)):
-    _get_request_device(req_id, u)
+    tid = u["tenant_id"]
     with db() as c:
-        c.execute("UPDATE requests SET status='closed', updated=? WHERE id=?", (time.time(), req_id))
+        _get_request_device(c, tid, req_id, u)
+        c.execute("UPDATE requests SET status='closed', updated=? WHERE id=? AND tenant_id=?",
+                  (time.time(), req_id, tid))
     return {"ok": True}
 
 
@@ -906,46 +1161,40 @@ def _month_key(ts: float) -> str:
 
 @app.get("/api/dashboard")
 def dashboard(u=Depends(current_user)):
+    tid = u["tenant_id"]
     admin = u["role"] == "admin"
     now = time.time()
     this_month = time.strftime("%Y-%m", time.gmtime(now))
-    rate_default = default_rate()
     with db() as c:
-        # customer id -> effective rate
-        crates = {}
-        cnames = {}
-        for row in c.execute("SELECT id, name, rate FROM customers"):
+        t = tenant_by_id(c, tid)
+        rate_default = tenant_rate(t)
+        crates, cnames = {}, {}
+        for row in c.execute("SELECT id, name, rate FROM customers WHERE tenant_id=?", (tid,)):
             crates[row["id"]] = row["rate"] if row["rate"] is not None else rate_default
             cnames[row["id"]] = row["name"]
-        # Only computers the viewer may see count toward the figures.
         where = _visible_where(u["role"])
-        devrows = c.execute(f"SELECT rd_id, name, last_seen FROM devices {where}").fetchall()
+        devrows = c.execute(
+            f"SELECT rd_id, name, last_seen FROM devices WHERE tenant_id=? {where}", (tid,)).fetchall()
         visible = {row["rd_id"] for row in devrows}
         devnames = {row["rd_id"]: row["name"] for row in devrows}
         online_now = sum(1 for row in devrows if now - row["last_seen"] < ONLINE_SECONDS)
         total_computers = len(devrows)
-        total_customers = c.execute("SELECT COUNT(*) n FROM customers").fetchone()["n"]
-
-        done = [
-            s for s in c.execute(
-                "SELECT rd_id, customer_id, started, seconds, billable FROM sessions WHERE ended IS NOT NULL")
-            if s["rd_id"] in visible
-        ]
-        open_now = sum(
-            1 for s in c.execute("SELECT rd_id FROM sessions WHERE ended IS NULL")
+        total_customers = c.execute(
+            "SELECT COUNT(*) n FROM customers WHERE tenant_id=?", (tid,)).fetchone()["n"]
+        done = [s for s in c.execute(
+            "SELECT rd_id, customer_id, started, seconds, billable FROM sessions "
+            "WHERE tenant_id=? AND ended IS NOT NULL", (tid,)) if s["rd_id"] in visible]
+        open_now = sum(1 for s in c.execute(
+            "SELECT rd_id FROM sessions WHERE tenant_id=? AND ended IS NULL", (tid,))
             if s["rd_id"] in visible)
 
-    # aggregate in Python (session volumes are small)
-    months = {}
-    per_customer = {}
-    per_computer = {}
-    sessions_month = 0
+    months, per_customer, per_computer, sessions_month = {}, {}, {}, 0
     for s in done:
         mk = _month_key(s["started"])
         secs = s["seconds"] or 0
         cid = s["customer_id"]
         rate = crates.get(cid, rate_default)
-        bsecs = secs if s["billable"] else 0  # only billable time is charged
+        bsecs = secs if s["billable"] else 0
         months.setdefault(mk, {"seconds": 0, "charge": 0.0, "sessions": 0})
         months[mk]["seconds"] += secs
         months[mk]["charge"] += bsecs / 3600 * rate
@@ -957,7 +1206,6 @@ def dashboard(u=Depends(current_user)):
             pk = per_computer.setdefault(s["rd_id"], {"seconds": 0, "sessions": 0})
             pk["seconds"] += secs; pk["sessions"] += 1
 
-    # last 6 months, oldest first, gaps filled
     series = []
     cm = time.gmtime(now)
     y, m = cm.tm_year, cm.tm_mon
@@ -993,7 +1241,7 @@ def dashboard(u=Depends(current_user)):
 
     hours_month = round(sum(d["seconds"] for cid, d in per_customer.items()) / 3600, 2)
     out = {
-        "currency": currency(),
+        "currency": tenant_currency(t),
         "month": this_month,
         "tiles": {
             "online_now": online_now,
@@ -1008,8 +1256,7 @@ def dashboard(u=Depends(current_user)):
         "computers": computers_out[:20],
     }
     if admin:
-        out["tiles"]["charge_month"] = round(
-            sum(c["charge"] for c in customers_out), 2)
+        out["tiles"]["charge_month"] = round(sum(c["charge"] for c in customers_out), 2)
         out["default_rate"] = rate_default
     return out
 
@@ -1017,13 +1264,15 @@ def dashboard(u=Depends(current_user)):
 # --- sessions (time log the technician can annotate) ------------------------
 @app.get("/api/sessions")
 def sessions_list(limit: int = 120, u=Depends(manager_user)):
+    tid = u["tenant_id"]
     with db() as c:
+        t = tenant_by_id(c, tid)
         rows = c.execute(
             "SELECT s.*, d.name AS dev_name, cu.name AS customer_name FROM sessions s "
-            "LEFT JOIN devices d ON d.rd_id = s.rd_id "
-            "LEFT JOIN customers cu ON cu.id = s.customer_id "
-            "WHERE s.ended IS NOT NULL ORDER BY s.started DESC LIMIT ?",
-            (max(1, min(limit, 500)),)).fetchall()
+            "LEFT JOIN devices d ON d.rd_id = s.rd_id AND d.tenant_id = s.tenant_id "
+            "LEFT JOIN customers cu ON cu.id = s.customer_id AND cu.tenant_id = s.tenant_id "
+            "WHERE s.tenant_id=? AND s.ended IS NOT NULL ORDER BY s.started DESC LIMIT ?",
+            (tid, max(1, min(limit, 500)))).fetchall()
     admin = u["role"] == "admin"
     out = []
     for r in rows:
@@ -1032,7 +1281,7 @@ def sessions_list(limit: int = 120, u=Depends(manager_user)):
                "seconds": r["seconds"], "technician": r["technician"],
                "note": r["note"], "billable": bool(r["billable"])}
         if admin:
-            row["currency"] = currency()
+            row["currency"] = tenant_currency(t)
         out.append(row)
     return out
 
@@ -1044,6 +1293,7 @@ class SessionEdit(BaseModel):
 
 @app.patch("/api/sessions/{sid}")
 def session_edit(sid: int, body: SessionEdit, u=Depends(manager_user)):
+    tid = u["tenant_id"]
     fields: dict = {}
     if body.note is not None:
         fields["note"] = body.note.strip()
@@ -1051,24 +1301,26 @@ def session_edit(sid: int, body: SessionEdit, u=Depends(manager_user)):
         fields["billable"] = 1 if body.billable else 0
     if fields:
         with db() as c:
-            if not c.execute("SELECT 1 FROM sessions WHERE id=?", (sid,)).fetchone():
+            if not c.execute("SELECT 1 FROM sessions WHERE id=? AND tenant_id=?",
+                             (sid, tid)).fetchone():
                 raise HTTPException(404, "Unknown session")
             sets = ", ".join(f"{k}=?" for k in fields)
-            c.execute(f"UPDATE sessions SET {sets} WHERE id=?", (*fields.values(), sid))
+            c.execute(f"UPDATE sessions SET {sets} WHERE id=? AND tenant_id=?",
+                      (*fields.values(), sid, tid))
     return {"ok": True}
 
 
 @app.get("/api/audit")
 def audit_log(limit: int = 200, u=Depends(manager_user)):
+    tid = u["tenant_id"]
     with db() as c:
         rows = c.execute(
-            "SELECT ts, actor, action, rd_id, detail FROM audit ORDER BY id DESC LIMIT ?",
-            (min(max(limit, 1), 1000),),
-        ).fetchall()
+            "SELECT ts, actor, action, rd_id, detail FROM audit WHERE tenant_id=? "
+            "ORDER BY id DESC LIMIT ?", (tid, min(max(limit, 1), 1000))).fetchall()
     return [dict(r) for r in rows]
 
 
-# --- users (admin) -----------------------------------------------------------
+# --- users (admin / supervisor) ---------------------------------------------
 class UserIn(BaseModel):
     username: str = Field(min_length=2, max_length=40)
     full_name: str = Field(default="", max_length=80)
@@ -1078,27 +1330,29 @@ class UserIn(BaseModel):
 
 @app.get("/api/users")
 def users_list(u=Depends(manager_user)):
+    tid = u["tenant_id"]
     with db() as c:
         rows = c.execute(
-            "SELECT id, username, full_name, role, active, totp_secret != '' AS totp FROM users ORDER BY username"
-        ).fetchall()
+            "SELECT id, username, full_name, role, active, totp_secret != '' AS totp "
+            "FROM users WHERE tenant_id=? ORDER BY username", (tid,)).fetchall()
     return [dict(r) for r in rows]
 
 
 @app.post("/api/users")
 def users_create(body: UserIn, u=Depends(manager_user)):
-    # Supervisors may only create technicians; admins create any role.
+    tid = u["tenant_id"]
     if u["role"] != "admin" and body.role != "tech":
         raise HTTPException(403, "Supervisors can only add technicians")
     try:
         with db() as c:
             c.execute(
-                "INSERT INTO users (username, full_name, pw_hash, role, created) VALUES (?,?,?,?,?)",
-                (body.username.strip(), body.full_name.strip(), hash_pw(body.password), body.role, time.time()),
-            )
+                "INSERT INTO users (tenant_id, username, full_name, pw_hash, role, created) "
+                "VALUES (?,?,?,?,?,?)",
+                (tid, body.username.strip(), body.full_name.strip(), hash_pw(body.password),
+                 body.role, time.time()))
     except sqlite3.IntegrityError:
         raise HTTPException(409, "Username already exists")
-    audit(u["username"], "user-create", detail=f"{body.username} ({body.role})")
+    audit(u["username"], "user-create", detail=f"{body.username} ({body.role})", tenant_id=tid)
     return {"ok": True}
 
 
@@ -1112,11 +1366,12 @@ class UserPatch(BaseModel):
 
 @app.patch("/api/users/{uid}")
 def users_edit(uid: int, body: UserPatch, u=Depends(manager_user)):
+    tid = u["tenant_id"]
     with db() as c:
-        target = c.execute("SELECT role FROM users WHERE id=?", (uid,)).fetchone()
+        target = c.execute("SELECT role, superadmin FROM users WHERE id=? AND tenant_id=?",
+                           (uid, tid)).fetchone()
     if not target:
         raise HTTPException(404, "Unknown user")
-    # Supervisors may only manage technicians, and cannot promote anyone.
     if u["role"] != "admin":
         if target["role"] != "tech":
             raise HTTPException(403, "Supervisors can only manage technicians")
@@ -1132,6 +1387,8 @@ def users_edit(uid: int, body: UserPatch, u=Depends(manager_user)):
     if body.active is not None:
         if uid == u["id"] and not body.active:
             raise HTTPException(400, "You cannot disable yourself")
+        if target["superadmin"] and not body.active:
+            raise HTTPException(400, "You cannot disable the platform owner")
         fields["active"] = 1 if body.active else 0
     if body.reset_2fa:
         fields["totp_secret"] = ""
@@ -1139,9 +1396,9 @@ def users_edit(uid: int, body: UserPatch, u=Depends(manager_user)):
         return {"ok": True}
     with db() as c:
         sets = ", ".join(f"{k}=?" for k in fields)
-        # Any change to password, role or status logs the user out everywhere.
-        c.execute(f"UPDATE users SET {sets}, session_gen=session_gen+1 WHERE id=?", (*fields.values(), uid))
-    audit(u["username"], "user-edit", detail=f"user {uid}: {', '.join(fields)}")
+        c.execute(f"UPDATE users SET {sets}, session_gen=session_gen+1 WHERE id=? AND tenant_id=?",
+                  (*fields.values(), uid, tid))
+    audit(u["username"], "user-edit", detail=f"user {uid}: {', '.join(fields)}", tenant_id=tid)
     return {"ok": True}
 
 
@@ -1156,11 +1413,12 @@ def me_password(body: PwChange, response: Response, u=Depends(current_user)):
     if not check_pw(body.current, u["pw_hash"]):
         raise HTTPException(400, "Current password is wrong")
     with db() as c:
-        c.execute("UPDATE users SET pw_hash=?, session_gen=session_gen+1 WHERE id=?", (hash_pw(body.new), u["id"]))
+        c.execute("UPDATE users SET pw_hash=?, session_gen=session_gen+1 WHERE id=?",
+                  (hash_pw(body.new), u["id"]))
         gen = c.execute("SELECT session_gen FROM users WHERE id=?", (u["id"],)).fetchone()[0]
     response.set_cookie("exs_session", sign_session(u["id"], gen), httponly=True,
                         secure=COOKIE_SECURE, samesite="strict", max_age=SESSION_HOURS * 3600)
-    audit(u["username"], "password-change")
+    audit(u["username"], "password-change", tenant_id=u["tenant_id"])
     return {"ok": True}
 
 
@@ -1171,7 +1429,8 @@ _pending_totp: dict = {}
 def me_2fa_start(u=Depends(current_user)):
     secret = pyotp.random_base32()
     _pending_totp[u["id"]] = secret
-    uri = pyotp.TOTP(secret).provisioning_uri(name=u["username"], issuer_name=ISSUER)
+    label = f"{u['username']}@{u['tenant_slug']}"
+    uri = pyotp.TOTP(secret).provisioning_uri(name=label, issuer_name=ISSUER)
     img = qrcode.make(uri, image_factory=qrcode.image.svg.SvgPathImage)
     return {"secret": secret, "svg": img.to_string(encoding="unicode")}
 
@@ -1188,26 +1447,11 @@ def me_2fa_confirm(body: CodeIn, u=Depends(current_user)):
     with db() as c:
         c.execute("UPDATE users SET totp_secret=? WHERE id=?", (secret, u["id"]))
     _pending_totp.pop(u["id"], None)
-    audit(u["username"], "2fa-enabled")
+    audit(u["username"], "2fa-enabled", tenant_id=u["tenant_id"])
     return {"ok": True}
 
 
-# --- download links for customers -------------------------------------------
-# Stable "latest release" links, so a new build is picked up without editing these.
-_REL = "https://github.com/kpap235/rustdesk/releases/latest/download"
-DOWNLOAD_DEFAULTS = {
-    "download_exsupport": f"{_REL}/exSupport.exe",
-    "download_quick": f"{_REL}/exQuickSupport.exe",
-    "download_android": f"{_REL}/exQuickSupport.apk",
-}
-
-
-def get_downloads() -> dict:
-    with db() as c:
-        rows = dict(c.execute("SELECT key, value FROM settings WHERE key LIKE 'download_%'").fetchall())
-    return {k[len("download_"):]: rows.get(k, v) for k, v in DOWNLOAD_DEFAULTS.items()}
-
-
+# --- download links for customers (per tenant) ------------------------------
 class DownloadsIn(BaseModel):
     exsupport: str = Field(max_length=500)
     quick: str = Field(max_length=500)
@@ -1216,11 +1460,14 @@ class DownloadsIn(BaseModel):
 
 @app.get("/api/downloads")
 def downloads(u=Depends(current_user)):
-    return get_downloads()
+    with db() as c:
+        t = tenant_by_id(c, u["tenant_id"])
+    return tenant_downloads(t)
 
 
 @app.put("/api/downloads")
 def downloads_save(body: DownloadsIn, u=Depends(admin_user)):
+    tid = u["tenant_id"]
     values = {
         "download_exsupport": body.exsupport.strip(),
         "download_quick": body.quick.strip(),
@@ -1230,31 +1477,52 @@ def downloads_save(body: DownloadsIn, u=Depends(admin_user)):
         if v and not v.startswith("https://"):
             raise HTTPException(400, "Links must start with https://")
     with db() as c:
-        for k, v in values.items():
-            c.execute("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
-    audit(u["username"], "downloads-edit", detail=json.dumps(values))
-    return get_downloads()
+        c.execute("UPDATE tenants SET download_exsupport=?, download_quick=?, download_android=? "
+                  "WHERE id=?", (values["download_exsupport"], values["download_quick"],
+                                 values["download_android"], tid))
+        t = tenant_by_id(c, tid)
+    audit(u["username"], "downloads-edit", detail=json.dumps(values), tenant_id=tid)
+    return tenant_downloads(t)
 
 
-# Public short links for customers: they never change, the panel redirects to
-# whatever link an administrator saved on the Downloads page.
+def _resolve_tenant_for_public(c, slug: str, token: str) -> Optional[sqlite3.Row]:
+    if token:
+        t = tenant_by_enroll_token(c, token)
+        if t:
+            return t
+    if slug:
+        return tenant_by_slug(c, slug.strip().lower())
+    return tenant_by_slug(c, DEFAULT_SLUG)
+
+
+# Public short links for customers, per tenant. Legacy /get/<platform> keeps
+# serving the platform owner's own apps so old links and guides still work.
 @app.get("/get/{platform}")
 def get_app(platform: str):
-    links = get_downloads()
+    with db() as c:
+        t = tenant_by_slug(c, DEFAULT_SLUG)
+    links = tenant_downloads(t) if t else {}
     if platform not in links or not links[platform]:
         raise HTTPException(404, "Unknown download")
     return RedirectResponse(links[platform], status_code=302)
 
 
-# The latest app version the apps compare against to offer an update. Taken from
-# the newest GitHub release (cached), or a manual "app_version" setting override.
+@app.get("/t/{slug}/get/{platform}")
+def get_app_tenant(slug: str, platform: str):
+    with db() as c:
+        t = tenant_by_slug(c, slug.strip().lower())
+    if not t:
+        raise HTTPException(404, "Unknown workspace")
+    links = tenant_downloads(t)
+    if platform not in links or not links[platform]:
+        raise HTTPException(404, "Unknown download")
+    return RedirectResponse(links[platform], status_code=302)
+
+
 _APP_VER_CACHE = {"ts": 0.0, "ver": ""}
 
 
-def latest_app_version() -> str:
-    override = get_setting("app_version", "")
-    if override:
-        return override
+def _github_latest() -> str:
     now = time.time()
     if now - _APP_VER_CACHE["ts"] < 3600 and _APP_VER_CACHE["ver"]:
         return _APP_VER_CACHE["ver"]
@@ -1273,11 +1541,25 @@ def latest_app_version() -> str:
         return _APP_VER_CACHE["ver"]
 
 
+def latest_app_version(t: Optional[sqlite3.Row]) -> str:
+    if t and t["app_version"]:
+        return t["app_version"]
+    # Only the platform owner's apps auto-resolve from GitHub; others set it manually.
+    if t and t["slug"] == DEFAULT_SLUG:
+        return _github_latest()
+    return ""
+
+
 @app.api_route("/api/appversion", methods=["GET", "POST"])
-def app_version():
-    links = get_downloads()
+def app_version(tenant: str = "", x_enroll_token: str = Header(default="")):
+    with db() as c:
+        t = _resolve_tenant_for_public(c, tenant, x_enroll_token)
+        if not t:
+            raise HTTPException(404, "Unknown workspace")
+        links = tenant_downloads(t)
+        ver = latest_app_version(t)
     return {
-        "version": latest_app_version(),
+        "version": ver,
         "windows_quick": links.get("quick", ""),
         "windows_full": links.get("exsupport", ""),
         "android": links.get("android", ""),
@@ -1297,31 +1579,305 @@ def guide(lang: str = "el"):
                         content_disposition_type="inline")
 
 
-# --- ExelixisHub API (API key) ----------------------------------------------
+# --- public tenant branding --------------------------------------------------
+def _public_tenant(t: sqlite3.Row) -> dict:
+    return {
+        "slug": t["slug"],
+        "name": t["name"],
+        "phone": t["phone"],
+        "email": t["email"],
+        "website": t["website"],
+        "address": t["address"],
+        "hours": t["hours"],
+        "gdpr_text": t["gdpr_text"],
+        "consent_text": t["consent_text"],
+        "color_primary": t["color_primary"],
+        "color_accent": t["color_accent"],
+        "has_logo": bool(t["logo"]),
+        "logo_url": f"/t/{t['slug']}/logo.png" if t["logo"] else "",
+        "downloads": tenant_downloads(t),
+        "app_uri": t["app_uri"],
+        "panel_version": PANEL_VERSION,
+        "is_default": t["slug"] == DEFAULT_SLUG,
+    }
+
+
+@app.get("/api/tenant")
+def public_tenant(slug: str = ""):
+    with db() as c:
+        t = tenant_by_slug(c, (slug or DEFAULT_SLUG).strip().lower())
+    if not t or not t["active"]:
+        raise HTTPException(404, "Unknown workspace")
+    return _public_tenant(t)
+
+
+@app.get("/t/{slug}/logo.png")
+def tenant_logo(slug: str):
+    with db() as c:
+        t = tenant_by_slug(c, slug.strip().lower())
+    if not t or not t["logo"]:
+        raise HTTPException(404, "No logo")
+    return Response(content=t["logo"], media_type=t["logo_mime"] or "image/png",
+                    headers={"Cache-Control": "public, max-age=300"})
+
+
+# --- platform console (superadmin) ------------------------------------------
+def _tenant_admin_view(c, t: sqlite3.Row) -> dict:
+    counts = {}
+    for tbl in ("devices", "users", "customers"):
+        counts[tbl] = c.execute(
+            f"SELECT COUNT(*) n FROM {tbl} WHERE tenant_id=?", (t["id"],)).fetchone()["n"]
+    return {
+        "id": t["id"], "slug": t["slug"], "name": t["name"], "active": bool(t["active"]),
+        "phone": t["phone"], "email": t["email"], "website": t["website"],
+        "address": t["address"], "hours": t["hours"],
+        "gdpr_text": t["gdpr_text"], "consent_text": t["consent_text"],
+        "id_server": t["id_server"], "relay_server": t["relay_server"], "rd_key": t["rd_key"],
+        "app_uri": t["app_uri"], "default_rate": t["default_rate"], "currency": t["currency"],
+        "color_primary": t["color_primary"], "color_accent": t["color_accent"],
+        "has_logo": bool(t["logo"]), "logo_url": f"/t/{t['slug']}/logo.png" if t["logo"] else "",
+        "download_exsupport": t["download_exsupport"], "download_quick": t["download_quick"],
+        "download_android": t["download_android"], "app_version": t["app_version"],
+        "enroll_token": t["enroll_token"],
+        "devices": counts["devices"], "users": counts["users"], "customers": counts["customers"],
+    }
+
+
+@app.get("/api/admin/tenants")
+def tenants_list(u=Depends(super_user)):
+    with db() as c:
+        rows = c.execute("SELECT * FROM tenants ORDER BY id").fetchall()
+        return [_tenant_admin_view(c, t) for t in rows]
+
+
+class TenantCreate(BaseModel):
+    slug: str = Field(min_length=3, max_length=40)
+    name: str = Field(min_length=1, max_length=160)
+    admin_username: str = Field(min_length=2, max_length=40)
+    admin_password: str = Field(min_length=10, max_length=128)
+    phone: str = Field(default="", max_length=60)
+    email: str = Field(default="", max_length=160)
+    website: str = Field(default="", max_length=200)
+    id_server: str = Field(default="", max_length=200)
+    relay_server: str = Field(default="", max_length=200)
+    rd_key: str = Field(default="", max_length=400)
+    app_uri: str = Field(default="exsupport", max_length=40)
+
+
+@app.post("/api/admin/tenants")
+def tenant_create(body: TenantCreate, u=Depends(super_user)):
+    slug = body.slug.strip().lower()
+    if not SLUG_RE.match(slug):
+        raise HTTPException(400, "Slug must be 3-40 chars: lowercase letters, digits and hyphens")
+    app_uri = re.sub(r"[^a-z0-9]", "", body.app_uri.strip().lower()) or "exsupport"
+    token = secrets.token_urlsafe(24)
+    now = time.time()
+    with db() as c:
+        if tenant_by_slug(c, slug):
+            raise HTTPException(409, "A workspace with this slug already exists")
+        cur = c.execute(
+            """INSERT INTO tenants (slug, name, phone, email, website, id_server, relay_server,
+                                    rd_key, app_uri, enroll_token, created)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (slug, body.name.strip(), body.phone.strip(), body.email.strip(),
+             body.website.strip(), body.id_server.strip(),
+             body.relay_server.strip() or body.id_server.strip(), body.rd_key.strip(),
+             app_uri, token, now))
+        tid = cur.lastrowid
+        c.execute(
+            "INSERT INTO users (tenant_id, username, full_name, pw_hash, role, created) "
+            "VALUES (?,?,?,?,?,?)",
+            (tid, body.admin_username.strip(), "Administrator", hash_pw(body.admin_password),
+             "admin", now))
+    audit(u["username"], "tenant-create", detail=f"{slug} ({body.name})", tenant_id=tid)
+    return {"id": tid, "slug": slug, "enroll_token": token}
+
+
+class TenantPatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=160)
+    active: Optional[bool] = None
+    phone: Optional[str] = Field(default=None, max_length=60)
+    email: Optional[str] = Field(default=None, max_length=160)
+    website: Optional[str] = Field(default=None, max_length=200)
+    address: Optional[str] = Field(default=None, max_length=300)
+    hours: Optional[str] = Field(default=None, max_length=200)
+    gdpr_text: Optional[str] = Field(default=None, max_length=4000)
+    consent_text: Optional[str] = Field(default=None, max_length=4000)
+    id_server: Optional[str] = Field(default=None, max_length=200)
+    relay_server: Optional[str] = Field(default=None, max_length=200)
+    rd_key: Optional[str] = Field(default=None, max_length=400)
+    app_uri: Optional[str] = Field(default=None, max_length=40)
+    default_rate: Optional[float] = Field(default=None, ge=0, le=100000)
+    currency: Optional[str] = Field(default=None, max_length=8)
+    color_primary: Optional[str] = Field(default=None, max_length=16)
+    color_accent: Optional[str] = Field(default=None, max_length=16)
+    download_exsupport: Optional[str] = Field(default=None, max_length=500)
+    download_quick: Optional[str] = Field(default=None, max_length=500)
+    download_android: Optional[str] = Field(default=None, max_length=500)
+    app_version: Optional[str] = Field(default=None, max_length=40)
+
+
+@app.patch("/api/admin/tenants/{tid}")
+def tenant_patch(tid: int, body: TenantPatch, u=Depends(super_user)):
+    with db() as c:
+        t = tenant_by_id(c, tid)
+        if not t:
+            raise HTTPException(404, "Unknown workspace")
+        fields: dict = {}
+        data = body.model_dump(exclude_unset=True)
+        for k in ("name", "phone", "email", "website", "address", "hours", "gdpr_text",
+                  "consent_text", "id_server", "relay_server", "rd_key", "currency",
+                  "color_primary", "color_accent", "download_exsupport", "download_quick",
+                  "download_android", "app_version"):
+            if k in data and data[k] is not None:
+                fields[k] = data[k].strip() if isinstance(data[k], str) else data[k]
+        if "app_uri" in data and data["app_uri"] is not None:
+            fields["app_uri"] = re.sub(r"[^a-z0-9]", "", data["app_uri"].lower()) or "exsupport"
+        if "active" in data and data["active"] is not None:
+            if t["slug"] == DEFAULT_SLUG and not data["active"]:
+                raise HTTPException(400, "The platform owner's workspace cannot be suspended")
+            fields["active"] = 1 if data["active"] else 0
+        if "default_rate" in data and data["default_rate"] is not None:
+            fields["default_rate"] = data["default_rate"]
+        for link in ("download_exsupport", "download_quick", "download_android"):
+            if fields.get(link) and not fields[link].startswith("https://"):
+                raise HTTPException(400, "Links must start with https://")
+        if fields:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            c.execute(f"UPDATE tenants SET {sets} WHERE id=?", (*fields.values(), tid))
+    audit(u["username"], "tenant-edit", detail=f"{t['slug']}: {', '.join(fields)}", tenant_id=tid)
+    return {"ok": True}
+
+
+class LogoIn(BaseModel):
+    data_url: str = Field(max_length=4_000_000)  # data:image/png;base64,...
+
+
+@app.put("/api/admin/tenants/{tid}/logo")
+def tenant_logo_set(tid: int, body: LogoIn, u=Depends(super_user)):
+    m = re.match(r"^data:(image/(?:png|jpeg|svg\+xml|webp));base64,(.+)$", body.data_url.strip(),
+                 re.DOTALL)
+    if not m:
+        raise HTTPException(400, "Send a PNG/JPEG/SVG/WebP data URL")
+    mime, b64 = m.group(1), m.group(2)
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(400, "Bad image data")
+    if len(raw) > 2_000_000:
+        raise HTTPException(400, "Logo is too large (max 2 MB)")
+    with db() as c:
+        if not tenant_by_id(c, tid):
+            raise HTTPException(404, "Unknown workspace")
+        c.execute("UPDATE tenants SET logo=?, logo_mime=? WHERE id=?", (raw, mime, tid))
+    audit(u["username"], "tenant-logo", tenant_id=tid)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/tenants/{tid}/logo")
+def tenant_logo_clear(tid: int, u=Depends(super_user)):
+    with db() as c:
+        if not tenant_by_id(c, tid):
+            raise HTTPException(404, "Unknown workspace")
+        c.execute("UPDATE tenants SET logo=NULL, logo_mime='' WHERE id=?", (tid,))
+    return {"ok": True}
+
+
+@app.post("/api/admin/tenants/{tid}/rotate-token")
+def tenant_rotate_token(tid: int, u=Depends(super_user)):
+    token = secrets.token_urlsafe(24)
+    with db() as c:
+        if not tenant_by_id(c, tid):
+            raise HTTPException(404, "Unknown workspace")
+        c.execute("UPDATE tenants SET enroll_token=? WHERE id=?", (token, tid))
+    audit(u["username"], "tenant-rotate-token", tenant_id=tid)
+    return {"enroll_token": token}
+
+
+@app.get("/api/admin/tenants/{tid}/config")
+def tenant_build_config(tid: int, request: Request, u=Depends(super_user)):
+    """The branding + server config a per-tenant app build is compiled with."""
+    with db() as c:
+        t = tenant_by_id(c, tid)
+        if not t:
+            raise HTTPException(404, "Unknown workspace")
+    base = str(request.base_url).rstrip("/")
+    return {
+        "slug": t["slug"],
+        "name": t["name"],
+        "app_uri": t["app_uri"],
+        "id_server": t["id_server"],
+        "relay_server": t["relay_server"] or t["id_server"],
+        "rd_key": t["rd_key"],
+        "enroll_token": t["enroll_token"],
+        "api_base": base,
+        "phone": t["phone"],
+        "email": t["email"],
+        "website": t["website"],
+        "color_primary": t["color_primary"],
+        "color_accent": t["color_accent"],
+        "logo_url": f"{base}/t/{t['slug']}/logo.png" if t["logo"] else "",
+    }
+
+
+class TenantAdminIn(BaseModel):
+    username: str = Field(min_length=2, max_length=40)
+    password: str = Field(min_length=10, max_length=128)
+    full_name: str = Field(default="Administrator", max_length=80)
+
+
+@app.post("/api/admin/tenants/{tid}/admin")
+def tenant_add_admin(tid: int, body: TenantAdminIn, u=Depends(super_user)):
+    with db() as c:
+        if not tenant_by_id(c, tid):
+            raise HTTPException(404, "Unknown workspace")
+        try:
+            c.execute(
+                "INSERT INTO users (tenant_id, username, full_name, pw_hash, role, created) "
+                "VALUES (?,?,?,?,?,?)",
+                (tid, body.username.strip(), body.full_name.strip(), hash_pw(body.password),
+                 "admin", time.time()))
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Username already exists in this workspace")
+    audit(u["username"], "tenant-add-admin", detail=body.username.strip(), tenant_id=tid)
+    return {"ok": True}
+
+
+# --- ExelixisHub API (API key) — the platform owner's own tenant ------------
 @app.get("/api/hub/devices", dependencies=[Depends(hub_auth)])
 def hub_devices():
-    """Also used by the MikroTik VPN Monitoring site (with its own key)."""
     with db() as c:
-        rows = c.execute("SELECT * FROM devices ORDER BY name COLLATE NOCASE").fetchall()
+        tid = hub_tenant_id(c)
+        rows = c.execute("SELECT * FROM devices WHERE tenant_id=? ORDER BY name COLLATE NOCASE",
+                         (tid,)).fetchall()
     return [device_view(r) for r in rows]
 
 
 @app.post("/api/hub/devices/{rd_id}/connect")
 def hub_connect(rd_id: str, x_hub_user: str = Header(default="user"), source: str = Depends(hub_auth)):
-    r = get_device(rd_id)
-    audit(f"{source}:{x_hub_user[:60]}", "connect", rd_id, r["name"])
-    return {"link": connect_link(rd_id, dec(r["pw_enc"]))}
+    with db() as c:
+        tid = hub_tenant_id(c)
+        r = get_device(c, tid, rd_id)
+        t = tenant_by_id(c, tid)
+    audit(f"{source}:{x_hub_user[:60]}", "connect", rd_id, r["name"], tenant_id=tid)
+    return {"link": connect_link(t["app_uri"], rd_id, dec(r["pw_enc"]))}
 
 
 @app.patch("/api/hub/devices/{rd_id}")
-def hub_edit(rd_id: str, body: DeviceEdit, x_hub_user: str = Header(default="user"), source: str = Depends(hub_auth)):
-    get_device(rd_id)
-    fields = {k: v.strip() for k, v in body.model_dump().items() if v is not None}
+def hub_edit(rd_id: str, body: DeviceEdit, x_hub_user: str = Header(default="user"),
+             source: str = Depends(hub_auth)):
+    with db() as c:
+        tid = hub_tenant_id(c)
+        get_device(c, tid, rd_id)
+        fields = {k: v.strip() for k, v in body.model_dump().items()
+                  if v is not None and isinstance(v, str)}
+        if fields:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            c.execute(f"UPDATE devices SET {sets} WHERE tenant_id=? AND rd_id=?",
+                      (*fields.values(), tid, rd_id))
     if fields:
-        sets = ", ".join(f"{k}=?" for k in fields)
-        with db() as c:
-            c.execute(f"UPDATE devices SET {sets} WHERE rd_id=?", (*fields.values(), rd_id))
-        audit(f"{source}:{x_hub_user[:60]}", "edit", rd_id, json.dumps(fields, ensure_ascii=False))
+        audit(f"{source}:{x_hub_user[:60]}", "edit", rd_id,
+              json.dumps(fields, ensure_ascii=False), tenant_id=tid)
     return {"ok": True}
 
 
@@ -1336,9 +1892,18 @@ def healthz():
     return {"ok": True, "version": PANEL_VERSION}
 
 
+def _spa() -> FileResponse:
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"), headers={"Cache-Control": "no-store"})
+
+
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"), headers={"Cache-Control": "no-store"})
+    return _spa()
+
+
+@app.get("/t/{slug}")
+def tenant_page(slug: str):
+    return _spa()
 
 
 CSP = (
@@ -1360,10 +1925,8 @@ async def security_headers(request: Request, call_next):
     resp.headers["Referrer-Policy"] = "no-referrer"
     resp.headers["Content-Security-Policy"] = CSP
     resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    # Only assert HSTS when we know we are served over HTTPS (production).
     if COOKIE_SECURE:
         resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    # Never let the browser or a proxy cache API responses (device passwords etc.).
     if request.url.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     return resp

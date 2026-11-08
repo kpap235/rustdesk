@@ -138,7 +138,7 @@
   .rail-foot button:hover { border-color: #DCE6F7; }
   .rail-foot .ver { display: block; margin-top: 12px; font-size: 11px; color: #7F93B8; }
 
-  main { padding: 28px clamp(16px, 3vw, 40px) 60px; max-width: 1180px; width: 100%; }
+  main { padding: 28px clamp(16px, 3vw, 40px) 60px; max-width: 1180px; width: 100%; min-width: 0; }
   .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
   .page-head h1 { font-size: clamp(28px, 3vw, 36px); line-height: 1; margin: 0; }
   .page-head p { margin: 6px 0 0; color: var(--muted); }
@@ -259,6 +259,23 @@
   .pwrow { display: flex; gap: 8px; }
   .pwrow input { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
 
+  /* ---------- Platform / tenant editor ---------- */
+  dialog.dlg-wide { width: min(680px, calc(100% - 32px)); }
+  dialog.dlg-wide form { max-height: 86vh; overflow-y: auto; }
+  .subhead { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--navy); margin: 22px 0 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .subhead:first-of-type { border-top: 0; padding-top: 0; margin-top: 6px; }
+  .formgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .formgrid .field.full { grid-column: 1 / -1; }
+  @media (max-width: 560px) { .formgrid { grid-template-columns: 1fr; } }
+  .logo-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .logo-prev { width: 120px; height: 72px; border: 1px solid var(--line); border-radius: var(--radius-s); background:
+      repeating-conic-gradient(#e9eef6 0% 25%, #fff 0% 50%) 50% / 16px 16px; display: grid; place-items: center; overflow: hidden; }
+  .logo-prev img { max-width: 100%; max-height: 100%; }
+  .token-box, .cfg-box { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; background: var(--paper);
+      border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; word-break: break-all; }
+  .cfg-box { white-space: pre-wrap; max-height: 180px; overflow: auto; }
+  .ten-link { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--blue); word-break: break-all; }
+
   .dl-list { display: grid; gap: 14px; max-width: 860px; }
   .dl-row { display: flex; gap: 8px; flex-wrap: wrap; }
   .dl-row input { flex: 1 1 320px; min-width: 0; padding: 11px 12px; border: 1.5px solid var(--line); border-radius: var(--radius-s); background: var(--paper); font-size: 13px; }
@@ -310,38 +327,40 @@
 <section id="login" class="hidden">
   <div class="login-brand">
     <div>
-      <div class="brandline"><img class="mark" src="/static/icon.png" alt=""><img class="brandlogo" src="/static/logo-white.png" alt="Exelixisnet"></div>
+      <div class="brandline" id="brandLine"><img class="mark" src="/static/icon.png" alt=""><img class="brandlogo" src="/static/logo-white.png" alt="Exelixisnet"></div>
       <h1 class="slant">IT Support console</h1>
       <p>Find a customer, see if their computer is online, and connect in one click.</p>
     </div>
     <div class="cust">
-      <h2>Χρειάζεστε βοήθεια; · Need support?</h2>
-      <div class="dlbtns">
-        <a class="dlbtn" href="/get/quick">
+      <h2 id="supportHdr">Χρειάζεστε βοήθεια; · Need support?</h2>
+      <div class="dlbtns" id="dlBtns">
+        <a class="dlbtn" id="dlbWin" href="/get/quick">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="4" width="8" height="8" rx="1"/><rect x="13" y="4" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
-          <span>Windows<small>exQuickSupport</small></span>
+          <span>Windows<small>QuickSupport</small></span>
         </a>
-        <a class="dlbtn" href="/get/android">
+        <a class="dlbtn" id="dlbAnd" href="/get/android">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="9" width="14" height="9" rx="2"/><rect x="2.3" y="10" width="2" height="6" rx="1"/><rect x="19.7" y="10" width="2" height="6" rx="1"/><rect x="8" y="17" width="2" height="4" rx="1"/><rect x="14" y="17" width="2" height="4" rx="1"/><path d="M7 8a5 5 0 0 1 10 0H7Z"/><line x1="8.5" y1="3.6" x2="9.8" y2="5.6" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="15.5" y1="3.6" x2="14.2" y2="5.6" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><circle cx="10" cy="6" r=".7" fill="#13213d"/><circle cx="14" cy="6" r=".7" fill="#13213d"/></svg>
-          <span>Android<small>exQuickSupport</small></span>
+          <span>Android<small>QuickSupport</small></span>
         </a>
       </div>
-      <a class="guide" href="/guide/el" target="_blank" rel="noopener">Οδηγίες εγκατάστασης (PDF)</a>
-      &nbsp;·&nbsp;<a class="guide" href="/guide/en" target="_blank" rel="noopener">Instructions</a>
-      <p class="legal">
+      <span id="guideLinks">
+        <a class="guide" href="/guide/el" target="_blank" rel="noopener">Οδηγίες εγκατάστασης (PDF)</a>
+        &nbsp;·&nbsp;<a class="guide" href="/guide/en" target="_blank" rel="noopener">Instructions</a>
+      </span>
+      <p class="legal" id="loginLegal">
         <b>Κατεβάζοντας και εγκαθιστώντας την εφαρμογή, αποδέχεστε ότι η ExelixisNet μπορεί να συνδέεται και να χειρίζεται τη συσκευή σας για σκοπούς απομακρυσμένης τεχνικής υποστήριξης.</b>
         By downloading and installing the app you agree that ExelixisNet may connect to and control this device for remote technical support.
         <br><br>
         GDPR: Η ExelixisNet επεξεργάζεται το αναγνωριστικό, το όνομα υπολογιστή, τη διεύθυνση IP και τους χρόνους σύνδεσης της συσκευής σας, αποκλειστικά για την παροχή και καταγραφή της υποστήριξης. Τα δεδομένα δεν κοινοποιούνται σε τρίτους και διατηρούνται όσο χρειάζεται. Μπορείτε να ανακαλέσετε τη συγκατάθεση απεγκαθιστώντας την εφαρμογή· για τα δικαιώματά σας: <a href="mailto:info@exelixisnet.gr">info@exelixisnet.gr</a>.
       </p>
     </div>
-    <div class="contact">Exelixisnet · 2615 00 2000 · info@exelixisnet.gr</div>
+    <div class="contact" id="loginContact">Exelixisnet · 2615 00 2000 · info@exelixisnet.gr</div>
   </div>
   <div class="login-form">
     <form id="loginForm" autocomplete="on">
-      <img src="/static/logo.png" alt="exelixis net">
+      <img id="formLogo" src="/static/logo.png" alt="exelixis net">
       <h2 class="slant">Sign in</h2>
-      <p class="lead">For Exelixisnet technicians.</p>
+      <p class="lead" id="loginLead">For Exelixisnet technicians.</p>
       <label class="field"><span>Username</span><input id="lu" autocomplete="username" required></label>
       <label class="field"><span>Password</span><input id="lp" type="password" autocomplete="current-password" required></label>
       <label class="field hidden" id="codeWrap"><span>6-digit code from your authenticator app</span><input id="lc" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
@@ -356,8 +375,8 @@
 <section id="app" class="hidden">
   <aside class="rail">
     <div class="rail-brand">
-      <img src="/static/icon.png" alt="">
-      <div><strong class="slant">Exelixisnet</strong><small>IT Support</small></div>
+      <img id="railIcon" src="/static/icon.png" alt="">
+      <div><strong class="slant" id="railName">Exelixisnet</strong><small id="railSmall">IT Support</small></div>
     </div>
     <nav aria-label="Sections">
       <button data-tab="dashboard" class="on">Dashboard</button>
@@ -367,6 +386,7 @@
       <button data-tab="users" class="manager-only">Technicians</button>
       <button data-tab="audit" class="manager-only">Activity</button>
       <button data-tab="downloads">Downloads</button>
+      <button data-tab="platform" class="super-only">Platform</button>
       <button data-tab="account">My account</button>
       <button data-tab="news">What's new</button>
     </nav>
@@ -548,6 +568,20 @@
       </div>
     </div>
 
+    <!-- Platform (superadmin) -->
+    <div id="tab-platform" class="hidden">
+      <div class="page-head">
+        <div><h1 class="slant">Platform</h1><p>Every support workspace (tenant) on this panel. Each is fully separate — its own brand, RustDesk server, customers and computers.</p></div>
+        <button class="btn btn-primary" id="addTenant">+ Add workspace</button>
+      </div>
+      <div class="table-wrap">
+        <table id="tenantTable">
+          <thead><tr><th>Workspace</th><th>Sign-in link</th><th>Computers</th><th>Technicians</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- What's new -->
     <div id="tab-news" class="hidden">
       <div class="page-head"><div><h1 class="slant">What's new</h1><p id="newsLead">Every panel version and what changed in it.</p></div></div>
@@ -682,9 +716,154 @@
   </form>
 </dialog>
 
+<!-- Workspace (tenant) editor -->
+<dialog id="tenantDlg" class="dlg-wide" aria-labelledby="tenantDlgTitle">
+  <form method="dialog" id="tenantForm">
+    <h2 class="slant" id="tenantDlgTitle">Add workspace</h2>
+    <p class="sub" id="tenantDlgSub">A new support business on this panel, fully separated from the others.</p>
+
+    <div class="subhead">Identity</div>
+    <div class="formgrid">
+      <label class="field"><span>Business name *</span><input id="tnName" maxlength="160" required></label>
+      <label class="field"><span>URL slug * <small class="muted">(sign in at /t/slug)</small></span><input id="tnSlug" maxlength="40" placeholder="acme" autocomplete="off"></label>
+    </div>
+
+    <div id="tnCreateOnly">
+      <div class="subhead">First administrator</div>
+      <div class="formgrid">
+        <label class="field"><span>Admin username *</span><input id="tnAdminUser" maxlength="40" autocomplete="off"></label>
+        <label class="field"><span>Admin password *</span><input id="tnAdminPw" type="password" minlength="10" autocomplete="new-password"></label>
+      </div>
+    </div>
+
+    <div class="subhead">RustDesk server (their own deployment)</div>
+    <div class="formgrid">
+      <label class="field"><span>ID server</span><input id="tnIdServer" maxlength="200" placeholder="rd.acme.example" autocomplete="off"></label>
+      <label class="field"><span>Relay server <small class="muted">(blank = same)</small></span><input id="tnRelay" maxlength="200" autocomplete="off"></label>
+      <label class="field full"><span>Public key</span><input id="tnKey" maxlength="400" autocomplete="off"></label>
+      <label class="field"><span>App link scheme</span><input id="tnAppUri" maxlength="40" placeholder="exsupport" autocomplete="off"></label>
+    </div>
+
+    <div id="tnEditOnly" class="hidden">
+      <div class="subhead">Contact &amp; branding</div>
+      <div class="formgrid">
+        <label class="field"><span>Phone</span><input id="tnPhone" maxlength="60"></label>
+        <label class="field"><span>E-mail</span><input id="tnEmail" maxlength="160"></label>
+        <label class="field"><span>Website</span><input id="tnWebsite" maxlength="200"></label>
+        <label class="field"><span>Hours</span><input id="tnHours" maxlength="200"></label>
+        <label class="field full"><span>Address</span><input id="tnAddress" maxlength="300"></label>
+        <label class="field"><span>Primary colour</span><input id="tnColorP" type="color"></label>
+        <label class="field"><span>Accent colour</span><input id="tnColorA" type="color"></label>
+      </div>
+      <div class="logo-row" style="margin:6px 0 4px">
+        <div class="logo-prev" id="tnLogoPrev"></div>
+        <div>
+          <input type="file" id="tnLogoFile" accept="image/png,image/jpeg,image/svg+xml,image/webp" class="hidden">
+          <button type="button" class="btn btn-quiet" id="tnLogoBtn">Upload logo</button>
+          <button type="button" class="btn btn-quiet" id="tnLogoClear">Remove</button>
+          <div class="muted" style="font-size:12px;margin-top:6px">PNG/JPEG/SVG, max 2 MB. Shown on their sign-in page and app.</div>
+        </div>
+      </div>
+
+      <div class="subhead">Consent &amp; GDPR (shown on their sign-in page)</div>
+      <label class="field full"><span>Consent statement</span><textarea id="tnConsent" rows="2" maxlength="4000"></textarea></label>
+      <label class="field full"><span>GDPR notice</span><textarea id="tnGdpr" rows="3" maxlength="4000"></textarea></label>
+
+      <div class="subhead">Billing</div>
+      <div class="formgrid">
+        <label class="field"><span>Default rate (per hour)</span><input id="tnRate" type="number" min="0" step="1"></label>
+        <label class="field"><span>Currency</span><input id="tnCur" maxlength="8"></label>
+      </div>
+
+      <div class="subhead">App download links</div>
+      <label class="field full"><span>exSupport (Windows, technicians)</span><input id="tnDlExs" type="url" maxlength="500"></label>
+      <label class="field full"><span>QuickSupport (Windows)</span><input id="tnDlQk" type="url" maxlength="500"></label>
+      <label class="field full"><span>QuickSupport (Android)</span><input id="tnDlAnd" type="url" maxlength="500"></label>
+      <label class="field"><span>Latest app version <small class="muted">(for update prompts)</small></span><input id="tnAppVer" maxlength="40" placeholder="1.5.0"></label>
+
+      <div class="subhead">Enrollment token <small class="muted" style="font-weight:500;text-transform:none;letter-spacing:0">— built into this workspace's apps</small></div>
+      <div class="token-box" id="tnToken"></div>
+      <button type="button" class="btn btn-quiet" id="tnRotate" style="margin-top:8px">Rotate token</button>
+
+      <div class="subhead">Build config <small class="muted" style="font-weight:500;text-transform:none;letter-spacing:0">— feeds the per-workspace app build</small></div>
+      <div class="cfg-box" id="tnConfig">…</div>
+      <button type="button" class="btn btn-quiet" id="tnCopyCfg" style="margin-top:8px">Copy JSON</button>
+
+      <div class="subhead">Add another administrator</div>
+      <div class="formgrid">
+        <label class="field"><span>Username</span><input id="tnNewAdminUser" maxlength="40" autocomplete="off"></label>
+        <label class="field"><span>Password</span><input id="tnNewAdminPw" type="password" minlength="10" autocomplete="new-password"></label>
+      </div>
+      <button type="button" class="btn btn-quiet" id="tnAddAdmin">Add administrator</button>
+
+      <label class="checkrow" style="margin-top:18px" id="tnActiveRow">
+        <input type="checkbox" id="tnActive"><span>Active <small>(a suspended workspace cannot sign in or enrol computers)</small></span>
+      </label>
+    </div>
+
+    <div class="err" id="tenantErr" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn btn-quiet" id="tnCancel">Close</button>
+      <button class="btn btn-primary" id="tnSave">Create workspace</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
 const $ = (s) => document.querySelector(s);
 let me = null, devices = [], editId = null, editUser = null, filter = 'all', users = [], groupByCustomer = false;
+let loginTenant = '', brand = null, tenants = [], editTenant = null, pendingLogo = null;
+
+function tenantSlug() {
+  const m = location.pathname.match(/^\/t\/([a-z0-9-]+)/i);
+  return m ? m[1].toLowerCase() : '';
+}
+function darken(hex, amt) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if (!m) return hex;
+  let n = parseInt(m[1], 16);
+  let r = Math.max(0, (n >> 16) + amt), g = Math.max(0, ((n >> 8) & 255) + amt), b = Math.max(0, (n & 255) + amt);
+  return '#' + [r, g, b].map(x => Math.min(255, x).toString(16).padStart(2, '0')).join('');
+}
+function applyColors(t) {
+  const r = document.documentElement.style;
+  if (t && t.color_primary) { r.setProperty('--blue', t.color_primary); r.setProperty('--blue-press', darken(t.color_primary, -28)); }
+  if (t && t.color_accent) r.setProperty('--red', t.color_accent);
+}
+async function fetchBrand(slug) {
+  try { return await api('/api/tenant?slug=' + encodeURIComponent(slug || '')); }
+  catch (e) { return null; }
+}
+// Branded sign-in page for a non-default workspace. The platform owner's own
+// workspace keeps the hand-tuned Exelixis markup untouched.
+function applyLoginBrand(t) {
+  applyColors(t);
+  if (!t || t.is_default) return;
+  document.title = t.name;
+  $('#brandLine').innerHTML = t.logo_url
+    ? `<img class="brandlogo" src="${esc(t.logo_url)}" alt="${esc(t.name)}">`
+    : `<strong class="slant" style="font-size:40px;color:#fff">${esc(t.name)}</strong>`;
+  if (t.logo_url) { $('#formLogo').src = t.logo_url; $('#formLogo').style.maxHeight = '64px'; $('#formLogo').style.width = 'auto'; }
+  else $('#formLogo').classList.add('hidden');
+  $('#loginLead').textContent = `For ${t.name} technicians.`;
+  $('#supportHdr').textContent = 'Need support?';
+  const base = '/t/' + t.slug;
+  $('#dlbWin').href = base + '/get/quick';
+  $('#dlbAnd').href = base + '/get/android';
+  $('#guideLinks').classList.add('hidden');
+  const consent = (t.consent_text || '').trim(), gdpr = (t.gdpr_text || '').trim();
+  if (consent || gdpr) $('#loginLegal').innerHTML = (consent ? `<b>${esc(consent)}</b>` : '') + (gdpr ? `<br><br>${esc(gdpr)}` : '');
+  else $('#loginLegal').classList.add('hidden');
+  $('#loginContact').textContent = [t.name, t.phone, t.email].filter(Boolean).join(' · ');
+}
+function applyChrome(t) {
+  applyColors(t);
+  if (!t || t.is_default) return;
+  $('#railName').textContent = t.name;
+  $('#railName').classList.remove('slant');
+  $('#railSmall').textContent = 'IT Support';
+  if (t.logo_url) $('#railIcon').src = t.logo_url;
+  document.title = t.name;
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -720,7 +899,7 @@ function fmtId(id) { return String(id).replace(/(\d{3})(?=\d)/g, '$1 '); }
 $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault(); $('#loginErr').textContent = '';
   try {
-    await api('/api/login', { method: 'POST', body: { username: $('#lu').value, password: $('#lp').value, code: $('#lc').value } });
+    await api('/api/login', { method: 'POST', body: { username: $('#lu').value, password: $('#lp').value, code: $('#lc').value, tenant: loginTenant } });
     start();
   } catch (err) {
     if (err.data && err.data.need_code) { $('#codeWrap').classList.remove('hidden'); $('#lc').focus(); return; }
@@ -730,17 +909,23 @@ $('#loginForm').addEventListener('submit', async (e) => {
 $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.reload(); };
 
 async function start() {
+  loginTenant = tenantSlug();
   try { me = await api('/api/me'); }
   catch (e) {
+    brand = await fetchBrand(loginTenant);
+    if (!brand && loginTenant) $('#loginLead').textContent = 'Unknown workspace. Check the sign-in link.';
+    else applyLoginBrand(brand);
     $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); $('#lu').focus();
     fetch('/healthz').then(r => r.json()).then(h => { if (h.version) $('#loginVer').textContent = `Panel version ${h.version}`; }).catch(() => {});
     return;
   }
+  brand = await fetchBrand(me.tenant); applyChrome(brand);
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   $('#whoName').textContent = me.full_name || me.username;
   $('#panelVer').textContent = me.panel_version ? `Panel version ${me.panel_version}` : '';
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', me.role !== 'admin'));
   document.querySelectorAll('.manager-only').forEach(el => el.classList.toggle('hidden', me.role === 'tech'));
+  document.querySelectorAll('.super-only').forEach(el => el.classList.toggle('hidden', !me.superadmin));
   $('#tfaOn').classList.toggle('hidden', !me.totp); $('#tfaOff').classList.toggle('hidden', me.totp);
   loadDashboard();
   loadCustomers();
@@ -751,13 +936,14 @@ async function start() {
 // ---------- sections ----------
 document.querySelectorAll('.rail nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.rail nav button').forEach(x => x.classList.toggle('on', x === b));
-  ['dashboard', 'devices', 'customers', 'sessions', 'account', 'users', 'audit', 'news', 'downloads'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  ['dashboard', 'devices', 'customers', 'sessions', 'account', 'users', 'audit', 'news', 'downloads', 'platform'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
   if (b.dataset.tab === 'dashboard') loadDashboard();
   if (b.dataset.tab === 'customers') loadCustomers();
   if (b.dataset.tab === 'news') loadNews();
   if (b.dataset.tab === 'downloads') loadDownloads();
   if (b.dataset.tab === 'users') loadUsers();
   if (b.dataset.tab === 'audit') loadAudit();
+  if (b.dataset.tab === 'platform') loadPlatform();
   if (b.dataset.tab === 'devices') { $('#search').focus(); loadRequests(); }
   if (b.dataset.tab === 'sessions') loadSessions();
 });
@@ -1201,6 +1387,130 @@ async function loadAudit() {
     <td>${r.rd_id ? esc(fmtId(r.rd_id)) : ''}</td>
     <td class="muted">${esc(r.detail)}</td></tr>`).join('');
 }
+
+// ---------- platform (superadmin) ----------
+async function loadPlatform() {
+  try { tenants = await api('/api/admin/tenants'); } catch (e) { toast(e.message); return; }
+  const origin = location.origin;
+  $('#tenantTable').querySelector('tbody').innerHTML = tenants.map(t => {
+    const path = '/t/' + t.slug;
+    return `<tr>
+      <td><strong>${esc(t.name)}</strong><div class="muted" style="font-size:12px">${esc(t.slug)}</div></td>
+      <td><a class="ten-link" href="${esc(path)}" target="_blank" rel="noopener" title="${esc(origin + path)}">${esc(path)}</a></td>
+      <td>${t.devices}</td>
+      <td>${t.users}</td>
+      <td>${t.active ? '<span class="tag">Active</span>' : '<span class="tag off">Suspended</span>'}</td>
+      <td class="right"><button class="btn btn-quiet" data-tenant="${t.id}">Manage</button></td>
+    </tr>`;
+  }).join('');
+}
+$('#tenantTable').addEventListener('click', e => {
+  const b = e.target.closest('[data-tenant]'); if (!b) return;
+  openTenant(tenants.find(t => t.id == b.dataset.tenant));
+});
+$('#addTenant').onclick = () => openTenant(null);
+
+function openTenant(t) {
+  editTenant = t; pendingLogo = null;
+  const creating = !t;
+  $('#tenantDlgTitle').textContent = creating ? 'Add workspace' : t.name;
+  $('#tenantDlgSub').textContent = creating ? 'A new support business on this panel, fully separated from the others.' : 'slug: ' + t.slug;
+  $('#tenantErr').textContent = '';
+  $('#tnCreateOnly').classList.toggle('hidden', !creating);
+  $('#tnEditOnly').classList.toggle('hidden', creating);
+  $('#tnSlug').disabled = !creating;
+  $('#tnSave').textContent = creating ? 'Create workspace' : 'Save changes';
+  // common fields
+  $('#tnName').value = t ? t.name : '';
+  $('#tnSlug').value = t ? t.slug : '';
+  $('#tnIdServer').value = t ? t.id_server : '';
+  $('#tnRelay').value = t ? t.relay_server : '';
+  $('#tnKey').value = t ? t.rd_key : '';
+  $('#tnAppUri').value = t ? t.app_uri : 'exsupport';
+  if (creating) { $('#tnAdminUser').value = ''; $('#tnAdminPw').value = ''; }
+  else {
+    $('#tnPhone').value = t.phone; $('#tnEmail').value = t.email; $('#tnWebsite').value = t.website;
+    $('#tnHours').value = t.hours; $('#tnAddress').value = t.address;
+    $('#tnColorP').value = /^#[0-9a-f]{6}$/i.test(t.color_primary) ? t.color_primary : '#0b4fa3';
+    $('#tnColorA').value = /^#[0-9a-f]{6}$/i.test(t.color_accent) ? t.color_accent : '#c21f3a';
+    $('#tnConsent').value = t.consent_text; $('#tnGdpr').value = t.gdpr_text;
+    $('#tnRate').value = t.default_rate || 0; $('#tnCur').value = t.currency || '€';
+    $('#tnDlExs').value = t.download_exsupport; $('#tnDlQk').value = t.download_quick; $('#tnDlAnd').value = t.download_android;
+    $('#tnAppVer').value = t.app_version || '';
+    $('#tnToken').textContent = t.enroll_token;
+    $('#tnActive').checked = !!t.active;
+    $('#tnActiveRow').classList.toggle('hidden', t.id === 1);
+    $('#tnLogoPrev').innerHTML = t.has_logo ? `<img src="${esc(t.logo_url)}?r=${Date.now()}" alt="">` : '<span class="muted" style="font-size:11px">no logo</span>';
+    $('#tnNewAdminUser').value = ''; $('#tnNewAdminPw').value = '';
+    loadTenantConfig(t.id);
+  }
+  if (!$('#tenantDlg').open) $('#tenantDlg').showModal();
+}
+async function loadTenantConfig(id) {
+  try { const cfg = await api(`/api/admin/tenants/${id}/config`); $('#tnConfig').textContent = JSON.stringify(cfg, null, 2); }
+  catch (e) { $('#tnConfig').textContent = '(unavailable)'; }
+}
+$('#tnCancel').onclick = () => $('#tenantDlg').close();
+$('#tnCopyCfg').onclick = async () => {
+  try { await navigator.clipboard.writeText($('#tnConfig').textContent); toast('Build config copied'); } catch (e) { toast('Copy failed'); }
+};
+$('#tnLogoBtn').onclick = () => $('#tnLogoFile').click();
+$('#tnLogoFile').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  if (f.size > 2_000_000) { toast('Logo is too large (max 2 MB)'); return; }
+  const rd = new FileReader();
+  rd.onload = () => { pendingLogo = rd.result; $('#tnLogoPrev').innerHTML = `<img src="${pendingLogo}" alt="">`; };
+  rd.readAsDataURL(f);
+});
+$('#tnLogoClear').onclick = async () => {
+  if (!editTenant) { pendingLogo = null; $('#tnLogoPrev').innerHTML = '<span class="muted" style="font-size:11px">no logo</span>'; return; }
+  try { await api(`/api/admin/tenants/${editTenant.id}/logo`, { method: 'DELETE' }); pendingLogo = null;
+    $('#tnLogoPrev').innerHTML = '<span class="muted" style="font-size:11px">no logo</span>'; toast('Logo removed'); }
+  catch (e) { toast(e.message); }
+};
+$('#tnRotate').onclick = async () => {
+  if (!editTenant || !confirm('Rotate the enrollment token? Apps already built with the old token will stop enrolling until rebuilt.')) return;
+  try { const r = await api(`/api/admin/tenants/${editTenant.id}/rotate-token`, { method: 'POST' });
+    $('#tnToken').textContent = r.enroll_token; editTenant.enroll_token = r.enroll_token; loadTenantConfig(editTenant.id); toast('Token rotated'); }
+  catch (e) { toast(e.message); }
+};
+$('#tnAddAdmin').onclick = async () => {
+  if (!editTenant) return;
+  const username = $('#tnNewAdminUser').value.trim(), password = $('#tnNewAdminPw').value;
+  if (!username || password.length < 10) { toast('Enter a username and a 10+ character password'); return; }
+  try { await api(`/api/admin/tenants/${editTenant.id}/admin`, { method: 'POST', body: { username, password } });
+    $('#tnNewAdminUser').value = ''; $('#tnNewAdminPw').value = ''; toast('Administrator added'); loadPlatform(); }
+  catch (e) { toast(e.message); }
+};
+$('#tenantForm').addEventListener('submit', async e => {
+  e.preventDefault(); $('#tenantErr').textContent = '';
+  try {
+    if (!editTenant) {
+      const r = await api('/api/admin/tenants', { method: 'POST', body: {
+        slug: $('#tnSlug').value.trim().toLowerCase(), name: $('#tnName').value.trim(),
+        admin_username: $('#tnAdminUser').value.trim(), admin_password: $('#tnAdminPw').value,
+        id_server: $('#tnIdServer').value.trim(), relay_server: $('#tnRelay').value.trim(),
+        rd_key: $('#tnKey').value.trim(), app_uri: $('#tnAppUri').value.trim() } });
+      toast('Workspace created'); await loadPlatform();
+      openTenant(tenants.find(t => t.id === r.id));  // reopen in edit mode for branding + logo
+      return;
+    }
+    const body = {
+      name: $('#tnName').value.trim(), active: $('#tnActive').checked,
+      phone: $('#tnPhone').value.trim(), email: $('#tnEmail').value.trim(),
+      website: $('#tnWebsite').value.trim(), address: $('#tnAddress').value.trim(), hours: $('#tnHours').value.trim(),
+      consent_text: $('#tnConsent').value.trim(), gdpr_text: $('#tnGdpr').value.trim(),
+      id_server: $('#tnIdServer').value.trim(), relay_server: $('#tnRelay').value.trim(),
+      rd_key: $('#tnKey').value.trim(), app_uri: $('#tnAppUri').value.trim(),
+      default_rate: +$('#tnRate').value || 0, currency: $('#tnCur').value.trim() || '€',
+      color_primary: $('#tnColorP').value, color_accent: $('#tnColorA').value,
+      download_exsupport: $('#tnDlExs').value.trim(), download_quick: $('#tnDlQk').value.trim(),
+      download_android: $('#tnDlAnd').value.trim(), app_version: $('#tnAppVer').value.trim() };
+    await api(`/api/admin/tenants/${editTenant.id}`, { method: 'PATCH', body });
+    if (pendingLogo) { await api(`/api/admin/tenants/${editTenant.id}/logo`, { method: 'PUT', body: { data_url: pendingLogo } }); pendingLogo = null; }
+    $('#tenantDlg').close(); toast('Saved'); loadPlatform();
+  } catch (err) { $('#tenantErr').textContent = err.message; }
+});
 
 start();
 </script>

@@ -1,12 +1,26 @@
 name: Exelixisnet IT Support - build (Windows + Android)
 
 # Run manually: Actions -> "Exelixisnet IT Support - build (Windows + Android)" -> Run workflow.
-# Builds with our server and key built in and publishes release vX.Y.Z, where X.Y.Z is
-# exelixis/VERSION and the release notes are that version's section in exelixis/CHANGELOG.md.
+#
+# Builds the apps with a tenant's RustDesk server, key, name and enrollment token
+# built in, and publishes a release. The default tenant is "exelixis" (the platform
+# owner), which builds and publishes exactly as before.
+#
+# To build for another tenant:
+#   1. Add res/tenants/<slug>.json (copy res/tenants/_example-acme.json). The RustDesk
+#      public key goes here (it is not secret). slug, app_name/app_uri, exe names and
+#      panel_url must match what the panel shows under Platform -> that workspace.
+#   2. Add the tenant's enrollment token to the repo secret TENANT_ENROLL_TOKENS, a
+#      JSON map, e.g. {"acme":"<enroll token from the panel>"}.
+#   3. Run this workflow with tenant = <slug>. The release is tagged v<version>-<slug>.
 
 on:
   workflow_dispatch:
     inputs:
+      tenant:
+        description: "Tenant slug (res/tenants/<slug>.json). Leave 'exelixis' for your own build."
+        type: string
+        default: "exelixis"
       android:
         description: "Also build the Android app"
         type: boolean
@@ -16,65 +30,115 @@ permissions:
   contents: write
 
 jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      slug: ${{ steps.cfg.outputs.slug }}
+      name: ${{ steps.cfg.outputs.name }}
+      id_server: ${{ steps.cfg.outputs.id_server }}
+      pub_key: ${{ steps.cfg.outputs.pub_key }}
+      app_name: ${{ steps.cfg.outputs.app_name }}
+      panel_url: ${{ steps.cfg.outputs.panel_url }}
+      exe_full: ${{ steps.cfg.outputs.exe_full }}
+      exe_quick: ${{ steps.cfg.outputs.exe_quick }}
+      token: ${{ steps.tok.outputs.token }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Load tenant config
+        id: cfg
+        run: python3 res/exelixis/tenant_env.py "${{ inputs.tenant }}"
+      - name: Select enrollment token
+        id: tok
+        env:
+          DEFAULT_TOKEN: ${{ secrets.EXELIXIS_ENROLL_TOKEN }}
+          TOKENS_JSON: ${{ secrets.TENANT_ENROLL_TOKENS }}
+          TENANT: ${{ inputs.tenant }}
+        run: |
+          if [ "$TENANT" = "exelixis" ]; then
+            TOK="$DEFAULT_TOKEN"
+          else
+            TOK=$(printf '%s' "$TOKENS_JSON" | jq -r --arg s "$TENANT" '.[$s] // empty')
+          fi
+          if [ -z "$TOK" ]; then
+            echo "::error::No enrollment token for tenant '$TENANT'. Add it to the TENANT_ENROLL_TOKENS secret as {\"$TENANT\":\"<token>\"}."; exit 1
+          fi
+          echo "::add-mask::$TOK"
+          echo "token=$TOK" >> "$GITHUB_OUTPUT"
+
   version:
+    needs: config
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Read version and check it is new
         id: v
         env:
           GH_TOKEN: ${{ github.token }}
+          TENANT: ${{ inputs.tenant }}
         run: |
           V=$(tr -d ' \r\n' < exelixis/VERSION)
           echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::exelixis/VERSION must look like 1.2.3 (found '$V')"; exit 1; }
           grep -q "^## $V " exelixis/CHANGELOG.md || { echo "::error::exelixis/CHANGELOG.md has no '## $V' section - describe the changes first"; exit 1; }
-          if gh release view "v$V" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::error::Version $V was already released. Raise exelixis/VERSION and add a CHANGELOG section."; exit 1
+          if [ "$TENANT" = "exelixis" ]; then TAG="v$V"; else TAG="v$V-$TENANT"; fi
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::$TAG was already released. Raise exelixis/VERSION and add a CHANGELOG section."; exit 1
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: version
+    needs: [config, version]
     uses: ./.github/workflows/flutter-build.yml
     secrets: inherit
     with:
       upload-artifact: true
-      upload-tag: "exelixis-staging"
+      upload-tag: "${{ inputs.tenant }}-staging"
       publish-update-metadata: false
       windows-only: true
       with-android: ${{ inputs.android }}
       exelixis-version: ${{ needs.version.outputs.version }}
+      exelixis-id-server: ${{ needs.config.outputs.id_server }}
+      exelixis-pub-key: ${{ needs.config.outputs.pub_key }}
+      exelixis-app-name: ${{ needs.config.outputs.app_name }}
+      exelixis-panel-url: ${{ needs.config.outputs.panel_url }}
+      exelixis-enroll-token: ${{ needs.config.outputs.token }}
 
   publish:
-    needs: [version, build]
+    needs: [config, version, build]
     if: ${{ !cancelled() && needs.version.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
       V: ${{ needs.version.outputs.version }}
+      TAG: ${{ needs.version.outputs.tag }}
+      STAGING: "${{ inputs.tenant }}-staging"
+      FULL: ${{ needs.config.outputs.exe_full }}
+      QUICK: ${{ needs.config.outputs.exe_quick }}
+      TNAME: ${{ needs.config.outputs.name }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Collect, rename and publish v${{ env.V }}
+      - name: Collect, rename and publish ${{ env.TAG }}
         run: |
           mkdir dist
-          gh release download exelixis-staging -R "$GITHUB_REPOSITORY" -D staging
+          gh release download "$STAGING" -R "$GITHUB_REPOSITORY" -D staging
           # One Windows binary becomes two downloads: the file name decides the
           # variant at runtime (the packer passes its own name as RUSTDESK_APPNAME).
-          #   exSupport.exe       - full program for admins / technicians
-          #   exQuickSupport.exe  - locked customer build
+          #   <FULL>.exe       - full program for admins / technicians
+          #   <QUICK>.exe      - locked customer build
           # Android is always the customer build. Names are stable (no version),
           # so releases/latest/download/<name> always points at the newest build.
           for f in staging/*; do
             n=$(basename "$f")
             case "$n" in
-              *-x86_64.exe)    cp "$f" "dist/exSupport.exe"; cp "$f" "dist/exQuickSupport.exe" ;;
-              *-aarch64.exe)   cp "$f" "dist/exSupport-arm64.exe"; cp "$f" "dist/exQuickSupport-arm64.exe" ;;
-              *-aarch64.apk)   cp "$f" "dist/exQuickSupport-arm64.apk" ;;
-              *-armv7.apk)     cp "$f" "dist/exQuickSupport-armv7.apk" ;;
-              *-x86_64.apk)    cp "$f" "dist/exQuickSupport-x86_64.apk" ;;
-              *-universal.apk) cp "$f" "dist/exQuickSupport.apk" ;;
+              *-x86_64.exe)    cp "$f" "dist/${FULL}.exe"; cp "$f" "dist/${QUICK}.exe" ;;
+              *-aarch64.exe)   cp "$f" "dist/${FULL}-arm64.exe"; cp "$f" "dist/${QUICK}-arm64.exe" ;;
+              *-aarch64.apk)   cp "$f" "dist/${QUICK}-arm64.apk" ;;
+              *-armv7.apk)     cp "$f" "dist/${QUICK}-armv7.apk" ;;
+              *-x86_64.apk)    cp "$f" "dist/${QUICK}-x86_64.apk" ;;
+              *-universal.apk) cp "$f" "dist/${QUICK}.apk" ;;
               *) continue ;;
             esac
           done
@@ -83,6 +147,6 @@ jobs:
           # Release notes: this version's section of the change log
           awk -v v="$V" '$0 ~ "^## "v" " {on=1; next} /^## / {on=0} on' exelixis/CHANGELOG.md > notes.md
           RD=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          printf '\n---\nBuilt on RustDesk %s.\n\n- **exSupport.exe** - full program for technicians.\n- **exQuickSupport.exe** - send this to a customer; it runs without installing.\n- **exQuickSupport.apk** - the customer app for Android phones.\n' "$RD" >> notes.md
-          gh release create "v$V" dist/* -R "$GITHUB_REPOSITORY" --title "Exelixisnet IT Support $V" --notes-file notes.md --target "$GITHUB_SHA"
-          gh release delete exelixis-staging -R "$GITHUB_REPOSITORY" --cleanup-tag -y || true
+          printf '\n---\nBuilt on RustDesk %s.\n\n- **%s.exe** - full program for technicians.\n- **%s.exe** - send this to a customer; it runs without installing.\n- **%s.apk** - the customer app for Android phones.\n' "$RD" "$FULL" "$QUICK" "$QUICK" >> notes.md
+          gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --title "$TNAME $V" --notes-file notes.md --target "$GITHUB_SHA"
+          gh release delete "$STAGING" -R "$GITHUB_REPOSITORY" --cleanup-tag -y || true

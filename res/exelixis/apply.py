@@ -12,15 +12,21 @@ import os
 import re
 import sys
 
-# --- Exelixisnet settings -------------------------------------------------
-SERVER = "rustdesk.exelixisnet.gr"
-PUB_KEY = "OMTaNaukuebffcMIkLStsdfGx6bP0vgtJ68bRpX7Ec0="
-# Compiled-in default internal name. At runtime exelixis::init_variant() sets
-# this to "exSupport" (full technician build) or "exQuickSupport" (customer
-# build) from the exe name, so this default is only a fallback. Must not
-# contain spaces (Windows service commands are not quoted); the spaced display
-# name lives in Cargo.toml / the UI instead.
-APP_NAME = "exSupport"
+# --- Settings (per tenant, with the Exelixisnet defaults) ------------------
+# A multi-tenant build overrides these through the environment so each reseller's
+# app points at their own RustDesk deployment and carries their own name. With no
+# environment set, the values are exactly the Exelixisnet defaults, so the
+# platform owner's own build is unchanged.
+SERVER = os.environ.get("EXELIXIS_ID_SERVER", "").strip() or "rustdesk.exelixisnet.gr"
+PUB_KEY = os.environ.get("EXELIXIS_PUB_KEY", "").strip() or "OMTaNaukuebffcMIkLStsdfGx6bP0vgtJ68bRpX7Ec0="
+# Compiled-in default internal name, also the custom URI scheme (lower-cased:
+# exSupport -> exsupport://). At runtime exelixis::init_variant() switches the
+# display between the full and QuickSupport build. Must not contain spaces
+# (Windows service commands are not quoted) — letters and digits only.
+APP_NAME = os.environ.get("EXELIXIS_APP_NAME", "").strip() or "exSupport"
+if not re.fullmatch(r"[A-Za-z0-9]+", APP_NAME):
+    print(f"ERROR: EXELIXIS_APP_NAME must be letters/digits only (got {APP_NAME!r})")
+    sys.exit(1)
 # ---------------------------------------------------------------------------
 
 def _find_root() -> str:

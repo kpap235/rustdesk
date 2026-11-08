@@ -3,6 +3,23 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 2.0.0 — 2026-11-08
+- **Multi-tenant.** The panel now hosts many separate support businesses (tenants),
+  each fully isolated — its own brand, RustDesk server, customers, technicians and
+  computers. A technician only ever sees and connects to computers in their own
+  tenant; two tenants can share the same RustDesk ID with no collision.
+- **Platform console** (for the platform owner): add and manage workspaces — name,
+  URL slug, logo, contact info, consent & GDPR text, RustDesk server/relay/key,
+  hourly rate, download links and colours. Rotate a workspace's enrollment token and
+  copy its app **build config**. Your own Exelixisnet workspace is the first tenant.
+- **Branded sign-in** at `/t/<slug>`: each tenant's own logo, colours, support
+  downloads and consent/GDPR text; the panel chrome is branded once signed in.
+- Each tenant has its own **enrollment token**, so a customer's app registers into
+  the right workspace; the client, session, request and Hub APIs are all tenant-scoped.
+- Existing single-tenant data migrates automatically into the **exelixis** tenant on
+  first start; the old enrollment token, logins, computers, customers, sessions and
+  billing are preserved. The Hub/Monitor API keys map to your own workspace.
+
 ## 1.9.0 — 2026-11-08
 - **Support requests ("Call for help"):** when a customer asks for help from the app, it shows as
   a banner at the top of Computers with Claim / Connect / Done, and a counter on the menu.

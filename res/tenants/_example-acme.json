@@ -1,0 +1,16 @@
+{
+  "slug": "acme",
+  "name": "Acme Remote Care",
+  "id_server": "rd.acme.example",
+  "pub_key": "PUT-ACMES-RUSTDESK-SERVER-PUBLIC-KEY-HERE=",
+  "app_name": "AcmeSupport",
+  "app_uri": "acmesupport",
+  "panel_url": "https://rustdesk.exelixisnet.gr",
+  "exe_full": "AcmeSupport",
+  "exe_quick": "AcmeQuickSupport",
+  "phone": "+30 210 000 0000",
+  "email": "help@acme.example",
+  "website": "https://acme.example",
+  "color_primary": "#1D7A3A",
+  "color_accent": "#E2642A"
+}
