@@ -18,6 +18,10 @@ PANEL_MONITOR_API_KEY=$MONKEY
 PANEL_ADMIN_USER=admin
 PANEL_ADMIN_PASSWORD=$ADMINPW
 PANEL_APP_URI=exsupport
+# Optional: connect the panel to your exUpdates manager (updates.exelixisnet.eu).
+# Uncomment and set the URL+key to register this panel for one-click redeploys.
+#EXUPDATES_URL=https://updates.exelixisnet.eu
+#EXUPDATES_KEY=
 EOT
 chmod 600 .env
 mkdir -p data && chmod 777 data

@@ -12,8 +12,10 @@ the platform owner's own tenant through the /api/hub endpoints with an API key.
 """
 import base64
 import binascii
+import csv
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -53,9 +55,22 @@ DEFAULT_RD_RELAY = os.environ.get("PANEL_RD_RELAY", os.environ.get("PANEL_RD_ID_
 DEFAULT_RD_KEY = os.environ.get("PANEL_RD_KEY", "")
 ONLINE_SECONDS = int(os.environ.get("PANEL_ONLINE_SECONDS", "180"))
 SESSION_HOURS = int(os.environ.get("PANEL_SESSION_HOURS", "12"))
+# An open support session whose computer stopped heart-beating (went offline) or
+# that has run past this cap is auto-closed, so a force-closed/crashed app does
+# not leave a session "in progress" forever.
+MAX_SESSION_SECONDS = int(os.environ.get("PANEL_MAX_SESSION_HOURS", "12")) * 3600
 COOKIE_SECURE = os.environ.get("PANEL_COOKIE_SECURE", "1") == "1"
 ISSUER = "Exelixisnet IT Support"
 CHANGELOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CHANGELOG.md")
+
+# --- exUpdates (central updates/deploy manager) -----------------------------
+# When EXUPDATES_URL is set, the panel registers itself with exUpdates
+# (updates.exelixisnet.eu): it heart-beats its version and status, and learns
+# whether a newer panel version is available. Unset = disabled, nothing changes.
+EXUPDATES_URL = os.environ.get("EXUPDATES_URL", "").rstrip("/")
+EXUPDATES_KEY = os.environ.get("EXUPDATES_KEY", "")
+EXUPDATES_APP_ID = os.environ.get("EXUPDATES_APP_ID", "exsupport-panel")
+EXUPDATES_INSTANCE = os.environ.get("EXUPDATES_INSTANCE", DEFAULT_SLUG)
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 
@@ -788,11 +803,49 @@ def _is_older(a: str, b: str) -> bool:
     return bool(ta) and bool(tb) and ta < tb
 
 
+def reap_stale_sessions(c, tid: Optional[int] = None) -> None:
+    """Close sessions left open by a force-closed / crashed / powered-off app.
+
+    The controlled computer reports when a technician disconnects, but if its app
+    is killed that report never arrives. Such a session is closed once the computer
+    stops heart-beating (goes offline) or it has run past the hard cap. The end
+    time is estimated from the last heartbeat (≈ when the app actually stopped).
+    """
+    now = time.time()
+    q = ("SELECT s.id, s.started, d.last_seen FROM sessions s "
+         "JOIN devices d ON d.rd_id = s.rd_id AND d.tenant_id = s.tenant_id "
+         "WHERE s.ended IS NULL")
+    params: tuple = ()
+    if tid is not None:
+        q += " AND s.tenant_id=?"
+        params = (tid,)
+    for r in c.execute(q, params).fetchall():
+        offline = now - r["last_seen"] > ONLINE_SECONDS
+        too_long = now - r["started"] > MAX_SESSION_SECONDS
+        if not (offline or too_long):
+            continue
+        end = r["last_seen"] if offline else now
+        end = min(max(end, r["started"]), r["started"] + MAX_SESSION_SECONDS)
+        c.execute("UPDATE sessions SET ended=?, seconds=? WHERE id=?",
+                  (end, max(0, int(end - r["started"])), r["id"]))
+    # Open sessions whose computer was deleted: close them without phantom time.
+    orphan_q = ("SELECT s.id, s.started FROM sessions s WHERE s.ended IS NULL "
+                "AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.rd_id=s.rd_id "
+                "AND d.tenant_id=s.tenant_id)")
+    oparams: tuple = ()
+    if tid is not None:
+        orphan_q += " AND s.tenant_id=?"
+        oparams = (tid,)
+    for r in c.execute(orphan_q, oparams).fetchall():
+        c.execute("UPDATE sessions SET ended=?, seconds=0 WHERE id=?", (r["started"], r["id"]))
+
+
 @app.get("/api/devices")
 def list_devices(u=Depends(current_user)):
     tid = u["tenant_id"]
     where = _visible_where(u["role"], "d.")
     with db() as c:
+        reap_stale_sessions(c, tid)
         t = tenant_by_id(c, tid)
         latest = latest_app_version(t)
         rows = c.execute(
@@ -1166,6 +1219,7 @@ def dashboard(u=Depends(current_user)):
     now = time.time()
     this_month = time.strftime("%Y-%m", time.gmtime(now))
     with db() as c:
+        reap_stale_sessions(c, tid)
         t = tenant_by_id(c, tid)
         rate_default = tenant_rate(t)
         crates, cnames = {}, {}
@@ -1261,11 +1315,167 @@ def dashboard(u=Depends(current_user)):
     return out
 
 
+# --- full statistics (reports page) -----------------------------------------
+def _parse_ts(v, default: float) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _stats_rows(c, u, frm: float, to: float):
+    """Closed sessions in [frm, to) the viewer may see, with rate/name lookups."""
+    tid = u["tenant_id"]
+    t = tenant_by_id(c, tid)
+    rate_default = tenant_rate(t)
+    crates, cnames = {}, {}
+    for row in c.execute("SELECT id, name, rate FROM customers WHERE tenant_id=?", (tid,)):
+        crates[row["id"]] = row["rate"] if row["rate"] is not None else rate_default
+        cnames[row["id"]] = row["name"]
+    where = _visible_where(u["role"])
+    devrows = c.execute(
+        f"SELECT rd_id, name, customer_id FROM devices WHERE tenant_id=? {where}", (tid,)).fetchall()
+    visible = {r["rd_id"] for r in devrows}
+    devnames = {r["rd_id"]: r["name"] for r in devrows}
+    devcust = {r["rd_id"]: r["customer_id"] for r in devrows}
+    rows = c.execute(
+        "SELECT rd_id, customer_id, started, seconds, billable, technician FROM sessions "
+        "WHERE tenant_id=? AND ended IS NOT NULL AND started>=? AND started<?",
+        (tid, frm, to)).fetchall()
+    rows = [r for r in rows if r["rd_id"] in visible]
+    return rows, crates, cnames, devnames, devcust, rate_default, tenant_currency(t)
+
+
+@app.get("/api/stats")
+def stats(request: Request, u=Depends(manager_user)):
+    admin = u["role"] == "admin"
+    now = time.time()
+    frm = _parse_ts(request.query_params.get("from"), 0.0)
+    to = _parse_ts(request.query_params.get("to"), now)
+    with db() as c:
+        reap_stale_sessions(c, u["tenant_id"])
+        rows, crates, cnames, devnames, devcust, rate_default, cur = _stats_rows(c, u, frm, to)
+
+    def blank():
+        return {"seconds": 0, "bsecs": 0, "sessions": 0, "charge": 0.0}
+
+    per_customer, per_computer, per_tech, months = {}, {}, {}, {}
+    tot = blank()
+    comps_seen, custs_seen, techs_seen = set(), set(), set()
+    for r in rows:
+        secs = r["seconds"] or 0
+        cid = r["customer_id"]
+        bsecs = secs if r["billable"] else 0
+        ch = bsecs / 3600 * crates.get(cid, rate_default)
+        tech = (r["technician"] or "").strip()
+        for bucket, key in ((per_customer, cid), (per_computer, r["rd_id"]),
+                            (per_tech, tech), (months, _month_key(r["started"]))):
+            d = bucket.setdefault(key, blank())
+            d["seconds"] += secs; d["bsecs"] += bsecs; d["sessions"] += 1; d["charge"] += ch
+        tot["seconds"] += secs; tot["bsecs"] += bsecs; tot["sessions"] += 1; tot["charge"] += ch
+        comps_seen.add(r["rd_id"])
+        if cid:
+            custs_seen.add(cid)
+        if tech:
+            techs_seen.add(tech)
+
+    def hrs(s):
+        return round(s / 3600, 2)
+
+    def rowset(bucket, namer, extra=None):
+        out = []
+        for key, d in bucket.items():
+            row = {"hours": hrs(d["seconds"]), "billable_hours": hrs(d["bsecs"]),
+                   "sessions": d["sessions"]}
+            row.update(namer(key))
+            if extra:
+                row.update(extra(key))
+            if admin:
+                row["charge"] = round(d["charge"], 2)
+            out.append(row)
+        out.sort(key=lambda x: x.get("charge", x["hours"]), reverse=True)
+        return out
+
+    customers_out = rowset(per_customer,
+                           lambda cid: {"customer_id": cid,
+                                        "name": cnames.get(cid, "Unassigned") if cid else "Unassigned"})
+    computers_out = rowset(per_computer,
+                           lambda rid: {"rd_id": rid, "name": devnames.get(rid, rid),
+                                        "customer_name": cnames.get(devcust.get(rid)) if devcust.get(rid) else None})
+    tech_out = rowset(per_tech, lambda nm: {"name": nm or "—"})
+
+    series = []
+    for mk in sorted(months.keys()):
+        d = months[mk]
+        row = {"month": mk, "hours": hrs(d["seconds"]), "sessions": d["sessions"]}
+        if admin:
+            row["charge"] = round(d["charge"], 2)
+        series.append(row)
+
+    out = {
+        "currency": cur,
+        "from": frm, "to": to,
+        "totals": {
+            "sessions": tot["sessions"],
+            "hours": hrs(tot["seconds"]),
+            "billable_hours": hrs(tot["bsecs"]),
+            "unbilled_hours": hrs(tot["seconds"] - tot["bsecs"]),
+            "computers": len(comps_seen),
+            "customers": len(custs_seen),
+            "technicians": len(techs_seen),
+        },
+        "months": series,
+        "customers": customers_out,
+        "computers": computers_out,
+        "technicians": tech_out,
+    }
+    if admin:
+        out["totals"]["charge"] = round(tot["charge"], 2)
+        out["default_rate"] = rate_default
+    return out
+
+
+@app.get("/api/stats.csv")
+def stats_csv(request: Request, u=Depends(manager_user)):
+    admin = u["role"] == "admin"
+    now = time.time()
+    frm = _parse_ts(request.query_params.get("from"), 0.0)
+    to = _parse_ts(request.query_params.get("to"), now)
+    with db() as c:
+        reap_stale_sessions(c, u["tenant_id"])
+        rows, crates, cnames, devnames, devcust, rate_default, cur = _stats_rows(c, u, frm, to)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    head = ["Date", "Time (UTC)", "Customer", "Computer", "RustDesk ID", "Technician",
+            "Minutes", "Hours", "Billable"]
+    if admin:
+        head += ["Rate/h", "Charge"]
+    w.writerow(head)
+    for r in sorted(rows, key=lambda x: x["started"]):
+        secs = r["seconds"] or 0
+        cid = r["customer_id"]
+        tm = time.gmtime(r["started"])
+        line = [time.strftime("%Y-%m-%d", tm), time.strftime("%H:%M", tm),
+                (cnames.get(cid, "Unassigned") if cid else "Unassigned"),
+                devnames.get(r["rd_id"], r["rd_id"]), r["rd_id"], (r["technician"] or ""),
+                round(secs / 60), round(secs / 3600, 2), ("yes" if r["billable"] else "no")]
+        if admin:
+            rate = crates.get(cid, rate_default)
+            charge = (secs if r["billable"] else 0) / 3600 * rate
+            line += [round(rate, 2), round(charge, 2)]
+        w.writerow(line)
+    fname = f"statistics_{time.strftime('%Y%m%d', time.gmtime(frm))}_{time.strftime('%Y%m%d', time.gmtime(to))}.csv"
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"',
+                             "Cache-Control": "no-store"})
+
+
 # --- sessions (time log the technician can annotate) ------------------------
 @app.get("/api/sessions")
 def sessions_list(limit: int = 120, u=Depends(manager_user)):
     tid = u["tenant_id"]
     with db() as c:
+        reap_stale_sessions(c, tid)
         t = tenant_by_id(c, tid)
         rows = c.execute(
             "SELECT s.*, d.name AS dev_name, cu.name AS customer_name FROM sessions s "
@@ -1881,6 +2091,61 @@ def hub_edit(rd_id: str, body: DeviceEdit, x_hub_user: str = Header(default="use
     return {"ok": True}
 
 
+# --- exUpdates client (central updates/deploy manager) ----------------------
+_EXUP = {"last_ok": 0.0, "last_err": "", "latest": "", "update": False}
+
+
+def exupdates_enabled() -> bool:
+    return bool(EXUPDATES_URL)
+
+
+def _exupdates_post(path: str, payload: dict) -> dict:
+    import urllib.request
+    req = urllib.request.Request(
+        EXUPDATES_URL + path, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": "exsupport-panel",
+                 "X-Updates-Key": EXUPDATES_KEY})
+    with urllib.request.urlopen(req, timeout=6) as r:
+        return json.load(r)
+
+
+def exupdates_heartbeat() -> None:
+    """Report this panel's version/status to exUpdates and learn the latest version."""
+    try:
+        data = _exupdates_post("/api/app/heartbeat", {
+            "app_id": EXUPDATES_APP_ID, "instance": EXUPDATES_INSTANCE,
+            "kind": "panel", "version": PANEL_VERSION, "status": "running"})
+        _EXUP["last_ok"] = time.time()
+        _EXUP["last_err"] = ""
+        if isinstance(data, dict):
+            latest = str(data.get("latest", "") or "")
+            _EXUP["latest"] = latest
+            _EXUP["update"] = bool(latest and _is_older(PANEL_VERSION, latest))
+    except Exception as e:
+        _EXUP["last_err"] = str(e)[:200]
+
+
+def _exupdates_loop() -> None:
+    while True:
+        exupdates_heartbeat()
+        time.sleep(900)
+
+
+@app.get("/api/platform/exupdates")
+def platform_exupdates(u=Depends(super_user)):
+    return {
+        "enabled": exupdates_enabled(),
+        "url": EXUPDATES_URL,
+        "app_id": EXUPDATES_APP_ID,
+        "instance": EXUPDATES_INSTANCE,
+        "panel_version": PANEL_VERSION,
+        "latest": _EXUP["latest"],
+        "update_available": _EXUP["update"],
+        "last_ok": _EXUP["last_ok"],
+        "last_error": _EXUP["last_err"],
+    }
+
+
 # --- web page ----------------------------------------------------------------
 @app.get("/api/changelog")
 def changelog(u=Depends(current_user)):
@@ -1933,3 +2198,5 @@ async def security_headers(request: Request, call_next):
 
 
 init_db()
+if exupdates_enabled():
+    threading.Thread(target=_exupdates_loop, daemon=True, name="exupdates").start()

@@ -3,6 +3,23 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 2.1.0 — 2026-11-09
+- **Statistics page** (admins & supervisors): pick any period — this/last month, this
+  quarter, this year, all-time or a custom date range — and see totals (sessions, hours,
+  billable hours, amount charged) with breakdowns **by customer, by computer and by
+  technician**, a per-month hours chart, and a one-click **CSV export**. € amounts stay
+  admin-only.
+- **Fixed sessions stuck "in progress".** If a customer force-closes, crashes or powers
+  off the app, its disconnect report never arrives and the session used to stay open
+  forever. Open sessions are now auto-closed once the computer stops heart-beating
+  (goes offline) or runs past a 12-hour cap, with the end time estimated from the last
+  heartbeat — so the "In session" badge clears and billed time stays accurate. No app
+  update needed; existing stuck sessions close on the next read.
+- **exUpdates connection** (optional): set `EXUPDATES_URL` (+ `EXUPDATES_KEY`) and the
+  panel registers itself with your central updates manager — reporting its version and
+  status and learning when a newer panel version is available (shown on the Platform
+  page). Unset = off, nothing changes.
+
 ## 2.0.0 — 2026-11-08
 - **Multi-tenant.** The panel now hosts many separate support businesses (tenants),
   each fully isolated — its own brand, RustDesk server, customers, technicians and

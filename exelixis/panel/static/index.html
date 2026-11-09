@@ -158,6 +158,7 @@
   .tile .l { font-size: 12px; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .04em; }
   .dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
   .dash-grid .panel:first-child { grid-column: 1 / -1; }
+  .dash-grid > * { min-width: 0; }
   .chart { display: flex; align-items: flex-end; gap: 14px; height: 200px; padding-top: 10px; }
   .chart .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
   .chart .bar { width: 100%; max-width: 54px; background: linear-gradient(180deg, var(--navy-2), var(--navy)); border-radius: 6px 6px 0 0; min-height: 2px; position: relative; }
@@ -310,6 +311,7 @@
     .rail-foot strong, .rail-foot span { display: none; }
     .rail-foot button { margin: 0; }
     .two { grid-template-columns: 1fr; }
+    .seg { flex-wrap: wrap; }
     .pc { grid-template-columns: 6px minmax(0, 1fr) auto; row-gap: 8px; }
     .pc .main { grid-column: 2 / 4; grid-row: 1; }
     .pc .cust { grid-column: 2 / 4; grid-row: 2; text-align: left; max-width: none; }
@@ -383,6 +385,7 @@
       <button data-tab="devices">Computers <span class="badge" id="navOnline">0</span><span class="badge req hidden" id="navReq"></span></button>
       <button data-tab="customers">Customers</button>
       <button data-tab="sessions" class="manager-only">Sessions</button>
+      <button data-tab="stats" class="manager-only">Statistics</button>
       <button data-tab="users" class="manager-only">Technicians</button>
       <button data-tab="audit" class="manager-only">Activity</button>
       <button data-tab="downloads">Downloads</button>
@@ -455,6 +458,56 @@
         </table>
       </div>
       <p class="muted" id="sessEmpty" style="margin-top:14px">No sessions recorded yet.</p>
+    </div>
+
+    <!-- Statistics -->
+    <div id="tab-stats" class="hidden">
+      <div class="page-head">
+        <div><h1 class="slant">Statistics</h1><p>Support time and charges across any period — by customer, computer and technician.</p></div>
+        <button class="btn btn-quiet" id="statExport">Export CSV</button>
+      </div>
+      <div class="finder">
+        <div class="seg" id="statPeriods" role="group" aria-label="Period">
+          <button data-period="month" class="on">This month</button>
+          <button data-period="last">Last month</button>
+          <button data-period="quarter">This quarter</button>
+          <button data-period="year">This year</button>
+          <button data-period="all">All time</button>
+          <button data-period="custom">Custom</button>
+        </div>
+        <div id="statCustom" class="hidden" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <label class="field" style="margin:0"><span>From</span><input type="date" id="statFrom"></label>
+          <label class="field" style="margin:0"><span>To</span><input type="date" id="statTo"></label>
+          <button class="btn btn-primary" id="statApply">Apply</button>
+        </div>
+      </div>
+      <p class="muted" id="statRange" style="margin:-4px 0 16px"></p>
+      <div class="tiles" id="statTiles"></div>
+      <div class="panel" style="margin-bottom:18px">
+        <h2>Hours per month</h2>
+        <div id="statChart" class="chart"></div>
+      </div>
+      <div class="dash-grid">
+        <div class="panel">
+          <h2>By customer</h2>
+          <div class="table-wrap"><table id="statCust">
+            <thead><tr><th>Customer</th><th>Hours</th><th>Billable</th><th class="admin-only">Charge</th><th>Sessions</th></tr></thead>
+            <tbody></tbody></table></div>
+        </div>
+        <div class="panel">
+          <h2>By computer</h2>
+          <div class="table-wrap"><table id="statComp">
+            <thead><tr><th>Computer</th><th>Hours</th><th class="admin-only">Charge</th><th>Sessions</th></tr></thead>
+            <tbody></tbody></table></div>
+        </div>
+        <div class="panel">
+          <h2>By technician</h2>
+          <div class="table-wrap"><table id="statTech">
+            <thead><tr><th>Technician</th><th>Hours</th><th>Billable</th><th class="admin-only">Charge</th><th>Sessions</th></tr></thead>
+            <tbody></tbody></table></div>
+        </div>
+      </div>
+      <p class="muted hidden" id="statEmpty" style="margin-top:14px">No sessions in this period.</p>
     </div>
 
     <!-- Computers -->
@@ -573,6 +626,13 @@
       <div class="page-head">
         <div><h1 class="slant">Platform</h1><p>Every support workspace (tenant) on this panel. Each is fully separate — its own brand, RustDesk server, customers and computers.</p></div>
         <button class="btn btn-primary" id="addTenant">+ Add workspace</button>
+      </div>
+      <div class="panel" id="exupPanel" style="margin-bottom:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        <div style="flex:1 1 260px;min-width:0">
+          <strong>exUpdates</strong>
+          <div class="muted" id="exupStatus" style="font-size:13px">Checking…</div>
+        </div>
       </div>
       <div class="table-wrap">
         <table id="tenantTable">
@@ -936,8 +996,9 @@ async function start() {
 // ---------- sections ----------
 document.querySelectorAll('.rail nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.rail nav button').forEach(x => x.classList.toggle('on', x === b));
-  ['dashboard', 'devices', 'customers', 'sessions', 'account', 'users', 'audit', 'news', 'downloads', 'platform'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  ['dashboard', 'devices', 'customers', 'sessions', 'stats', 'account', 'users', 'audit', 'news', 'downloads', 'platform'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
   if (b.dataset.tab === 'dashboard') loadDashboard();
+  if (b.dataset.tab === 'stats') loadStats();
   if (b.dataset.tab === 'customers') loadCustomers();
   if (b.dataset.tab === 'news') loadNews();
   if (b.dataset.tab === 'downloads') loadDownloads();
@@ -1225,6 +1286,70 @@ async function loadDashboard() {
     : `<tr><td class="muted">No time logged this month yet.</td></tr>`;
 }
 
+// ---------- statistics (full reports) ----------
+let statPeriod = 'month', statFromTs = 0, statToTs = 0;
+function periodRange(p) {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  let from, to = now;
+  if (p === 'month') from = new Date(y, m, 1);
+  else if (p === 'last') { from = new Date(y, m - 1, 1); to = new Date(y, m, 1); }
+  else if (p === 'quarter') from = new Date(y, Math.floor(m / 3) * 3, 1);
+  else if (p === 'year') from = new Date(y, 0, 1);
+  else if (p === 'all') from = new Date(2020, 0, 1);
+  else if (p === 'custom') {
+    const f = $('#statFrom').value, t = $('#statTo').value;
+    from = f ? new Date(f + 'T00:00:00') : new Date(y, m, 1);
+    to = t ? new Date(t + 'T23:59:59') : now;
+  }
+  return [Math.floor(from.getTime() / 1000), Math.floor(to.getTime() / 1000)];
+}
+function fmtDate(ts) { return new Date(ts * 1000).toLocaleDateString(); }
+async function loadStats() {
+  [statFromTs, statToTs] = periodRange(statPeriod);
+  let s; try { s = await api(`/api/stats?from=${statFromTs}&to=${statToTs}`); } catch (e) { toast(e.message); return; }
+  const cur = s.currency || '€', t = s.totals, admin = 'charge' in t;
+  $('#statRange').textContent = `${fmtDate(s.from)} – ${fmtDate(s.to)}`;
+  const tiles = [['sessions', 'Sessions'], ['hours', 'Hours', 'h'], ['billable_hours', 'Billable hours', 'h']];
+  if (admin) tiles.push(['charge', 'Charged', cur]);
+  tiles.push(['computers', 'Computers'], ['customers', 'Customers'], ['technicians', 'Technicians']);
+  $('#statTiles').innerHTML = tiles.map(([k, l, suf]) => {
+    let v = t[k]; if (suf === 'h') v = fmtNum(v) + 'h'; else if (suf) v = suf + fmtNum(v);
+    return `<div class="tile"><div class="n ${k === 'charge' ? 'accent' : ''}">${v}</div><div class="l">${l}</div></div>`;
+  }).join('');
+  const ms = s.months, max = Math.max(1, ...ms.map(x => x.hours));
+  $('#statChart').innerHTML = ms.length ? ms.map(x => {
+    const h = Math.round(x.hours / max * 160);
+    return `<div class="bar-col"><div class="bar" style="height:${h}px"><span class="v">${x.hours > 0 ? fmtNum(x.hours) + 'h' : ''}</span></div><span class="m">${monShort(x.month)}${x.month.endsWith('-01') || ms.length > 12 ? " '" + x.month.slice(2, 4) : ''}</span></div>`;
+  }).join('') : '<p class="muted">No time logged in this period.</p>';
+  const money = (v) => admin ? `<td>${cur}${fmtNum(v)}</td>` : '';
+  $('#statCust').querySelector('tbody').innerHTML = s.customers.map(r =>
+    `<tr><td><strong>${esc(r.name)}</strong></td><td>${fmtNum(r.hours)}h</td><td class="muted">${fmtNum(r.billable_hours)}h</td>${money(r.charge)}<td class="muted">${r.sessions}</td></tr>`).join('')
+    || `<tr><td class="muted" colspan="5">No data.</td></tr>`;
+  $('#statComp').querySelector('tbody').innerHTML = s.computers.map(r =>
+    `<tr><td><strong>${esc(r.name)}</strong>${r.customer_name ? `<div class="muted" style="font-size:12px">${esc(r.customer_name)}</div>` : ''}</td><td>${fmtNum(r.hours)}h</td>${money(r.charge)}<td class="muted">${r.sessions}</td></tr>`).join('')
+    || `<tr><td class="muted" colspan="4">No data.</td></tr>`;
+  $('#statTech').querySelector('tbody').innerHTML = s.technicians.map(r =>
+    `<tr><td><strong>${esc(r.name)}</strong></td><td>${fmtNum(r.hours)}h</td><td class="muted">${fmtNum(r.billable_hours)}h</td>${money(r.charge)}<td class="muted">${r.sessions}</td></tr>`).join('')
+    || `<tr><td class="muted" colspan="5">No data.</td></tr>`;
+  $('#statEmpty').classList.toggle('hidden', t.sessions > 0);
+}
+document.querySelectorAll('#statPeriods button').forEach(b => b.onclick = () => {
+  statPeriod = b.dataset.period;
+  document.querySelectorAll('#statPeriods button').forEach(x => x.classList.toggle('on', x === b));
+  $('#statCustom').classList.toggle('hidden', statPeriod !== 'custom');
+  if (statPeriod !== 'custom') loadStats();
+});
+$('#statApply').onclick = loadStats;
+$('#statExport').onclick = async () => {
+  try {
+    const res = await fetch(`/api/stats.csv?from=${statFromTs}&to=${statToTs}`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob(), url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = (res.headers.get('content-disposition') || '').match(/filename="(.+?)"/)?.[1] || 'statistics.csv';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  } catch (e) { toast(e.message); }
+};
+
 // ---------- customers (clients) ----------
 let customersCache = [], editCust = null;
 async function loadCustomers() {
@@ -1389,7 +1514,21 @@ async function loadAudit() {
 }
 
 // ---------- platform (superadmin) ----------
+async function loadExupdates() {
+  let x; try { x = await api('/api/platform/exupdates'); } catch (e) { return; }
+  const el = $('#exupStatus');
+  if (!x.enabled) {
+    el.innerHTML = 'Not connected. Set <code>EXUPDATES_URL</code> on the panel to register it with your updates manager for one-click redeploys.';
+    return;
+  }
+  const when = x.last_ok ? ago(x.last_ok) : 'never';
+  let s = `Connected to ${esc(x.url)} as <b>${esc(x.app_id)}</b> · panel v${esc(x.panel_version)} · last report ${when}`;
+  if (x.update_available) s += ` · <b style="color:var(--red)">update available (v${esc(x.latest)})</b>`;
+  if (x.last_error) s += ` · <span style="color:var(--red)">last error: ${esc(x.last_error)}</span>`;
+  el.innerHTML = s;
+}
 async function loadPlatform() {
+  loadExupdates();
   try { tenants = await api('/api/admin/tenants'); } catch (e) { toast(e.message); return; }
   const origin = location.origin;
   $('#tenantTable').querySelector('tbody').innerHTML = tenants.map(t => {
