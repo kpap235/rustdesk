@@ -12,6 +12,17 @@ version was already released, so every release has its own number and notes.
 
 Based on RustDesk (AGPL-3.0); the RustDesk version each release is built on is shown in brackets.
 
+## 1.5.1 — 2026-11-12 (RustDesk 1.5.1)
+
+### App (Android)
+- **Release-signed APK.** The Android app is now signed with Exelixis Net's own release key
+  instead of the shared Android debug key. Debug-signed sideloaded apps are hard-blocked by
+  Google Play Protect ("η εφαρμογή αποκλείστηκε"), which stopped customers installing it; a
+  stable release signature fixes that. Requires the signing secrets to be set on the repo
+  (`ANDROID_SIGNING_KEY`, `ANDROID_ALIAS`, `ANDROID_KEY_STORE_PASSWORD`, `ANDROID_KEY_PASSWORD`).
+  Because the signature changes, customers with the old build must uninstall it before installing
+  this one.
+
 ## 1.5.0 — 2026-11-08 (RustDesk 1.5.1)
 
 ### App (Windows and Android)
