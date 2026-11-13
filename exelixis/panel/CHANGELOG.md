@@ -3,6 +3,21 @@
 The newest version is at the top; its number is the panel's version.
 To release a panel change: add a section here, then update the VPS.
 
+## 2.1.1 — 2026-11-14
+- **Security hardening** (full audit — XSS, SQL injection and more):
+  - Fixed a **stored XSS**: a computer registered with a `"` in its ID or name could
+    break out of an HTML attribute and run script in a technician's session. Output
+    escaping now encodes quotes and backticks, so every rendered field is inert.
+  - **Content-Security-Policy** tightened: the page's inline script now runs only with a
+    per-request **nonce** (no more `'unsafe-inline'` for scripts), so any injected script
+    is blocked as defence-in-depth.
+  - **CSV export** now neutralises spreadsheet formula injection (a name like `=…` can no
+    longer run as a formula when the export is opened in Excel).
+  - **Logo images** are served sandboxed, so a malicious SVG logo can't execute in the panel.
+  - Workspace **colours** are validated as hex values (no CSS injection).
+  - Confirmed: all SQL is parameterised (no injection), tenants stay fully isolated, public
+    pages leak no tokens/keys, and sign-in cookies stay HttpOnly/Secure/SameSite=strict.
+
 ## 2.1.0 — 2026-11-09
 - **Statistics page** (admins & supervisors): pick any period — this/last month, this
   quarter, this year, all-time or a custom date range — and see totals (sessions, hours,

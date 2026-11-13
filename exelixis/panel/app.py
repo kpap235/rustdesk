@@ -73,6 +73,7 @@ EXUPDATES_APP_ID = os.environ.get("EXUPDATES_APP_ID", "exsupport-panel")
 EXUPDATES_INSTANCE = os.environ.get("EXUPDATES_INSTANCE", DEFAULT_SLUG)
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
+HEX_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
 
 
 def _read_changelog() -> str:
@@ -1435,6 +1436,14 @@ def stats(request: Request, u=Depends(manager_user)):
     return out
 
 
+def _csv_safe(v):
+    """Neutralise spreadsheet formula injection: a cell that starts with = + - @
+    (or a control char) is treated as a formula by Excel/Sheets, so prefix it."""
+    if isinstance(v, str) and v and (v[0] in "=+-@\t\r" or (len(v) > 1 and v[0] in " " and v.lstrip()[:1] in "=+-@")):
+        return "'" + v
+    return v
+
+
 @app.get("/api/stats.csv")
 def stats_csv(request: Request, u=Depends(manager_user)):
     admin = u["role"] == "admin"
@@ -1456,8 +1465,9 @@ def stats_csv(request: Request, u=Depends(manager_user)):
         cid = r["customer_id"]
         tm = time.gmtime(r["started"])
         line = [time.strftime("%Y-%m-%d", tm), time.strftime("%H:%M", tm),
-                (cnames.get(cid, "Unassigned") if cid else "Unassigned"),
-                devnames.get(r["rd_id"], r["rd_id"]), r["rd_id"], (r["technician"] or ""),
+                _csv_safe(cnames.get(cid, "Unassigned") if cid else "Unassigned"),
+                _csv_safe(devnames.get(r["rd_id"], r["rd_id"])), _csv_safe(r["rd_id"]),
+                _csv_safe(r["technician"] or ""),
                 round(secs / 60), round(secs / 3600, 2), ("yes" if r["billable"] else "no")]
         if admin:
             rate = crates.get(cid, rate_default)
@@ -1828,7 +1838,9 @@ def tenant_logo(slug: str):
     if not t or not t["logo"]:
         raise HTTPException(404, "No logo")
     return Response(content=t["logo"], media_type=t["logo_mime"] or "image/png",
-                    headers={"Cache-Control": "public, max-age=300"})
+                    headers={"Cache-Control": "public, max-age=300",
+                             "Content-Security-Policy": LOGO_CSP,
+                             "X-Content-Type-Options": "nosniff"})
 
 
 # --- platform console (superadmin) ------------------------------------------
@@ -1952,6 +1964,9 @@ def tenant_patch(tid: int, body: TenantPatch, u=Depends(super_user)):
         for link in ("download_exsupport", "download_quick", "download_android"):
             if fields.get(link) and not fields[link].startswith("https://"):
                 raise HTTPException(400, "Links must start with https://")
+        for ck in ("color_primary", "color_accent"):
+            if fields.get(ck) and not HEX_RE.match(fields[ck]):
+                raise HTTPException(400, "Colours must be a hex value like #0B4FA3")
         if fields:
             sets = ", ".join(f"{k}=?" for k in fields)
             c.execute(f"UPDATE tenants SET {sets} WHERE id=?", (*fields.values(), tid))
@@ -2157,8 +2172,38 @@ def healthz():
     return {"ok": True, "version": PANEL_VERSION}
 
 
-def _spa() -> FileResponse:
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"), headers={"Cache-Control": "no-store"})
+_CSP_COMMON = (
+    "img-src 'self' data:; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src https://fonts.gstatic.com; "
+    "connect-src 'self'; "
+    "default-src 'self'; "
+    "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+)
+# Non-HTML responses (API/JSON, downloads) need no scripts at all.
+CSP = "script-src 'self'; " + _CSP_COMMON
+# A served logo must never execute anything — defends against a malicious SVG logo
+# being opened directly (it would otherwise run in our origin).
+LOGO_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+
+
+def _page_csp(nonce: str) -> str:
+    # The single inline <script> runs only with this per-request nonce, so an
+    # injected inline script (XSS) will not execute. No 'unsafe-inline' for scripts.
+    return f"script-src 'self' 'nonce-{nonce}'; " + _CSP_COMMON
+
+
+def _spa() -> Response:
+    nonce = secrets.token_urlsafe(16)
+    try:
+        with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as f:
+            page = f.read()
+    except OSError:
+        raise HTTPException(500, "UI not available")
+    page = page.replace("<script>", f'<script nonce="{nonce}">', 1)
+    return Response(page, media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store",
+                             "Content-Security-Policy": _page_csp(nonce)})
 
 
 @app.get("/")
@@ -2171,24 +2216,14 @@ def tenant_page(slug: str):
     return _spa()
 
 
-CSP = (
-    "default-src 'self'; "
-    "img-src 'self' data:; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-    "font-src https://fonts.gstatic.com; "
-    "script-src 'self' 'unsafe-inline'; "
-    "connect-src 'self'; "
-    "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
-)
-
-
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"
-    resp.headers["Content-Security-Policy"] = CSP
+    # Endpoints that set their own CSP (the SPA page, the logo) keep it.
+    resp.headers.setdefault("Content-Security-Policy", CSP)
     resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if COOKIE_SECURE:
         resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

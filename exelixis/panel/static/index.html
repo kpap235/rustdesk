@@ -952,7 +952,10 @@ function ago(ts) {
   if (s < 86400 * 7) return Math.round(s / 86400) + ' days ago';
   return new Date(ts * 1000).toLocaleDateString();
 }
-function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+// Escapes for both text and quoted-attribute contexts (quotes and backtick included),
+// so interpolated values like data-connect="${esc(id)}" cannot break out of an attribute.
+const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;', '=': '&#61;' };
+function esc(s) { return String(s ?? '').replace(/[&<>"'`=]/g, c => _escMap[c]); }
 function fmtId(id) { return String(id).replace(/(\d{3})(?=\d)/g, '$1 '); }
 
 // ---------- sign in ----------
